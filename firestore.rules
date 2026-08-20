@@ -1,0 +1,153 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Master Gate: Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helper Functions ---
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'Jamesmaude12@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Entity Validations ---
+
+    function isValidViewer(data) {
+      return data.keys().hasAll(['id', 'username', 'displayName', 'role']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.username is string && data.username.size() <= 64 &&
+             data.displayName is string && data.displayName.size() <= 64 &&
+             data.role is string &&
+             (!('points' in data) || (data.points is int && data.points >= 0)) &&
+             (!('totalPointsEarned' in data) || (data.totalPointsEarned is int && data.totalPointsEarned >= 0));
+    }
+
+    function isValidBotIdentity(data) {
+      return data.botName is string && data.botName.size() <= 64 &&
+             data.streamerName is string && data.streamerName.size() <= 64;
+    }
+
+    function isValidTrigger(data) {
+      return data.trigger is string && data.trigger.size() <= 128 &&
+             data.response is string && data.response.size() <= 500;
+    }
+
+    // --- Collection Rules ---
+
+    match /workspaces/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+    
+    match /viewers/{viewerId} {
+      allow get: if isSignedIn();
+      allow list: if isAdmin();
+      allow create: if isSignedIn() && isValidViewer(incoming()) && incoming().id == viewerId;
+      allow update: if isSignedIn() && (
+        (isOwner(viewerId) && isValidViewer(incoming()) && 
+         incoming().diff(existing()).affectedKeys().hasOnly(['points', 'totalPointsEarned', 'watchTimeMinutes', 'lastSeen', 'messageCount', 'visitStreak', 'customFacts', 'notes', 'avatarColor', 'avatarUrl', 'channelUrl', 'customShoutoutMessage', 'autoShoutout']) &&
+         incoming().role == existing().role) || // Owner cannot change their own role
+        isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /config/{document=**} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Deprecated rules:
+    match /config/botIdentity {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() && isValidBotIdentity(incoming());
+    }
+
+    match /config/points {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /config/shoutouts {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /config/gameState {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /roles/{roleId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /triggers/{triggerId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() && isValidTrigger(incoming());
+    }
+
+    match /achievements/{achId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /soundEffects/{sfxId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /redeems/{redeemId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /redemptions/{redId} {
+      allow read, write: if isSignedIn(); // Basic, needs hardening based on role
+    }
+
+    match /messages/{msgId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && incoming().timestamp == request.time;
+      allow update, delete: if isAdmin();
+    }
+
+    match /logs/{logId} {
+      allow read, create: if isAdmin();
+    }
+
+    match /shoutoutHistory/{soId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if false; // Only manageable via console or higher admin
+    }
+  }
+}

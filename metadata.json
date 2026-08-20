@@ -1,0 +1,6 @@
+{
+  "name": "DroidOS",
+  "description": "An intelligent YouTube chat bot management system with custom responses, role-based interactions, viewer profiles, dynamic bot identity, and real-time live chat listener.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,67 @@
+{
+  "projectInfo": {
+    "name": "DroidOS",
+    "platform": "web",
+    "features": [
+      "firestore"
+    ]
+  },
+  "collections": [
+    {
+      "name": "profiles",
+      "description": "Stores viewer profiles, points, and chat history metrics.",
+      "securityRules": {
+        "read": "request.auth != null",
+        "write": "request.auth != null"
+      },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "username": { "type": "string" },
+          "displayName": { "type": "string" },
+          "role": { "type": "string" },
+          "points": { "type": "number" },
+          "watchTimeMinutes": { "type": "number" },
+          "messageCount": { "type": "number" },
+          "lastSeen": { "type": "string" },
+          "avatarUrl": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "triggers",
+      "description": "Stores custom chat commands and keyword triggers.",
+      "securityRules": {
+        "read": "request.auth != null",
+        "write": "request.auth != null"
+      },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "trigger": { "type": "string" },
+          "response": { "type": "string" },
+          "enabled": { "type": "boolean" }
+        }
+      }
+    },
+    {
+      "name": "settings",
+      "description": "Stores global app settings and bot identity configuration.",
+      "securityRules": {
+        "read": "request.auth != null",
+        "write": "request.auth != null"
+      },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "botIdentity": { "type": "object" },
+          "pointsConfig": { "type": "object" },
+          "shoutoutConfig": { "type": "object" },
+          "gameConfig": { "type": "object" }
+        }
+      }
+    }
+  ]
+}
