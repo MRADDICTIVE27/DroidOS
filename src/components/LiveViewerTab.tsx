@@ -212,6 +212,7 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
   const handleSendTestLiveMessage = async () => {
     setIsSendingTestLiveMsg(true);
     setTestLiveMsgNotice(null);
+    setConnectError(null);
     try {
       const token = getAccessToken();
       const testContent = `🤖 [${botIdentity.botName}] Live bot connection verified! (${new Date().toLocaleTimeString()})`;
@@ -229,13 +230,20 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
         })
       });
 
-      const data = await res.json();
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        // Safe fallback
+      }
+
       if (!res.ok || data.error) {
         throw new Error(data.error || 'Failed to send test message');
       }
 
-      setTestLiveMsgNotice('Test message broadcasted to YouTube Live Chat!');
-      setTimeout(() => setTestLiveMsgNotice(null), 4000);
+      const noticeText = data.notice || data.warning || 'Test message broadcasted to Live Stream Chat!';
+      setTestLiveMsgNotice(noticeText);
+      setTimeout(() => setTestLiveMsgNotice(null), 5000);
     } catch (err: any) {
       setConnectError(`Failed to send test message: ${err.message}`);
     } finally {

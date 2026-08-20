@@ -226,8 +226,9 @@ async function startServer() {
       return res.status(400).json({ error: "Message content cannot be empty" });
     }
 
-    if (!activeChatId) {
-      // Local broadcast fallback when not connected to a live stream ID
+    // If chat is public scraper, no real liveChatId, or no OAuth token
+    if (!activeChatId || activeChatId.startsWith('public-') || !token) {
+      // Local broadcast fallback when not connected to a live stream ID or when unauthenticated
       const localMsg = {
         id: `msg-server-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         sender: req.body.sender || "DroidBot",
@@ -237,11 +238,14 @@ async function startServer() {
         isBot: true
       };
       chatMessagesQueue = [...chatMessagesQueue, localMsg].slice(-200);
-      return res.json({ success: true, localOnly: true, message: localMsg });
-    }
-
-    if (!token) {
-      return res.status(401).json({ error: "YouTube OAuth access token is required to post to live chat." });
+      return res.json({
+        success: true,
+        localOnly: true,
+        message: localMsg,
+        notice: token
+          ? "Message recorded in stream chat feed."
+          : "Message broadcast locally. (Sign in with Google in Authenticator to write directly to YouTube Chat API)"
+      });
     }
 
     try {
@@ -265,27 +269,64 @@ async function startServer() {
         }
       );
 
-      const data = await response.json();
-      if (data.error) {
-        console.error("[YouTube LiveChat Send Error]", data.error);
-        return res.status(response.status).json({ error: data.error.message || "YouTube API error" });
-      }
+      const contentType = response.headers.get("content-type") || "";
+      if (response.ok && contentType.includes("json")) {
+        const data = await response.json();
+        const sentMsg = {
+          id: data.id || `yt-${Date.now()}`,
+          sender: req.body.sender || data.snippet?.authorDetails?.displayName || "DroidBot",
+          content: cleanMsg,
+          senderRole: "bot",
+          timestamp: new Date().toLocaleTimeString(),
+          isBot: true
+        };
+        chatMessagesQueue = [...chatMessagesQueue, sentMsg].slice(-200);
+        return res.json({ success: true, item: data });
+      } else {
+        let errMessage = "YouTube LiveChat API returned an error";
+        if (contentType.includes("json")) {
+          try {
+            const errData = await response.json();
+            errMessage = errData.error?.message || errMessage;
+          } catch {
+            // ignore
+          }
+        }
 
-      // Add to local queue as well
+        // Fallback: save to local queue
+        const sentMsg = {
+          id: `local-${Date.now()}`,
+          sender: req.body.sender || "DroidBot",
+          content: cleanMsg,
+          senderRole: "bot",
+          timestamp: new Date().toLocaleTimeString(),
+          isBot: true
+        };
+        chatMessagesQueue = [...chatMessagesQueue, sentMsg].slice(-200);
+        return res.json({
+          success: true,
+          localOnly: true,
+          warning: errMessage,
+          message: sentMsg
+        });
+      }
+    } catch (err: any) {
+      console.error("[YouTube LiveChat Network Error]", err);
       const sentMsg = {
-        id: data.id || `yt-${Date.now()}`,
-        sender: req.body.sender || data.snippet?.authorDetails?.displayName || "DroidBot",
+        id: `local-${Date.now()}`,
+        sender: req.body.sender || "DroidBot",
         content: cleanMsg,
         senderRole: "bot",
         timestamp: new Date().toLocaleTimeString(),
         isBot: true
       };
       chatMessagesQueue = [...chatMessagesQueue, sentMsg].slice(-200);
-
-      return res.json({ success: true, item: data });
-    } catch (err: any) {
-      console.error("[YouTube LiveChat Network Error]", err);
-      return res.status(500).json({ error: err.message || "Failed to send chat message" });
+      return res.json({
+        success: true,
+        localOnly: true,
+        warning: err.message || "Network exception",
+        message: sentMsg
+      });
     }
   });
 
