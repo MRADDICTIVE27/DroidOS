@@ -560,12 +560,18 @@ export const App: React.FC = () => {
           const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
           const firebase = await initFirebase();
           if (firebase?.db) {
+            console.log("Triggering OBS alert write to Firestore:", {
+              gifUrl: redeem.gifUrl,
+            });
             await addDoc(collection(firebase.db, 'alerts'), {
               gifUrl: redeem.gifUrl,
               audioUrl: redeem.linkedSoundId ? soundEffects.find(s => s.id === redeem.linkedSoundId)?.customAudioUrl : undefined,
               timestamp: serverTimestamp(),
               durationMs: 5000
             });
+            console.log("OBS alert written successfully.");
+          } else {
+            console.warn("Could not trigger OBS alert: Firebase not initialized.");
           }
         } catch (e) {
           console.error("Failed to trigger OBS overlay alert", e);
