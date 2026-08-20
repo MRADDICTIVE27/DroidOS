@@ -56,29 +56,43 @@ async function startServer() {
   let chatMessagesQueue: any[] = [];
   let nextChatPageToken: string | null = null;
   let chatPollTimeout: NodeJS.Timeout | null = null;
+  let cachedOAuthToken: string | null = null;
 
   async function pollYouTubeChat() {
     const apiKey = process.env.YOUTUBE_API_KEY;
     const chatId = streamMetadata.activeLiveChatId;
+    const token = cachedOAuthToken;
 
-    if (!apiKey || !chatId || !streamMetadata.isLive) {
+    if ((!apiKey && !token) || !chatId || !streamMetadata.isLive) {
       if (chatPollTimeout) clearTimeout(chatPollTimeout);
       chatPollTimeout = null;
       return;
     }
 
     try {
-      const url = `https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=${chatId}&part=snippet,authorDetails&maxResults=100&key=${apiKey}${nextChatPageToken ? `&pageToken=${nextChatPageToken}` : ''}`;
-      const res = await fetch(url);
+      let url = `https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=${chatId}&part=snippet,authorDetails&maxResults=100`;
+      if (apiKey) {
+        url += `&key=${apiKey}`;
+      }
+      if (nextChatPageToken) {
+        url += `&pageToken=${nextChatPageToken}`;
+      }
+
+      const headers: Record<string, string> = {};
+      if (token && !apiKey) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const res = await fetch(url, { headers });
       const data = await res.json();
 
       if (data.items && data.items.length > 0) {
         const newMsgs = data.items.map((item: any) => ({
           id: item.id,
-          sender: item.authorDetails.displayName,
-          content: item.snippet.displayMessage,
-          senderRole: item.authorDetails.isChatOwner ? 'owner' : (item.authorDetails.isChatModerator ? 'moderator' : 'viewer'),
-          timestamp: new Date(item.snippet.publishedAt).toLocaleTimeString(),
+          sender: item.authorDetails?.displayName || "Viewer",
+          content: item.snippet?.displayMessage || item.snippet?.textMessageDetails?.messageText || "",
+          senderRole: item.authorDetails?.isChatOwner ? 'owner' : (item.authorDetails?.isChatModerator ? 'moderator' : (item.authorDetails?.isChatSponsor ? 'subscriber' : 'viewer')),
+          timestamp: new Date(item.snippet?.publishedAt || Date.now()).toLocaleTimeString(),
           isBot: false
         }));
 
@@ -90,26 +104,110 @@ async function startServer() {
       }
 
       nextChatPageToken = data.nextPageToken;
-      const waitTime = data.pollingIntervalMillis || 5000;
+      const waitTime = data.pollingIntervalMillis || 4000;
       chatPollTimeout = setTimeout(pollYouTubeChat, waitTime);
     } catch (error) {
       console.error("[YouTube Chat Poller Error]", error);
-      chatPollTimeout = setTimeout(pollYouTubeChat, 10000); // Retry later
+      chatPollTimeout = setTimeout(pollYouTubeChat, 8000); // Retry later
     }
   }
 
   // API to get new messages for the frontend
   app.get("/api/youtube/chat", (req, res) => {
+    const token = req.query.token as string || req.headers.authorization?.replace("Bearer ", "");
+    if (token) {
+      cachedOAuthToken = token;
+      if (streamMetadata.isLive && streamMetadata.activeLiveChatId && !chatPollTimeout) {
+        pollYouTubeChat();
+      }
+    }
+
     const lastId = req.query.lastId;
     if (!lastId) {
-      return res.json(chatMessagesQueue.slice(-10)); // Return last 10 if first poll
+      return res.json(chatMessagesQueue.slice(-30));
     }
     const index = chatMessagesQueue.findIndex(m => m.id === lastId);
     if (index === -1) {
-      return res.json(chatMessagesQueue.slice(-20));
+      return res.json(chatMessagesQueue.slice(-30));
     }
     res.json(chatMessagesQueue.slice(index + 1));
   });
+
+
+  // API to send message to YouTube Live Chat
+  app.post("/api/youtube/send", async (req, res) => {
+    const { message, liveChatId, accessToken } = req.body;
+    const cleanMsg = (message || "").trim();
+    const activeChatId = liveChatId || streamMetadata.activeLiveChatId;
+    const token = accessToken || req.headers.authorization?.replace("Bearer ", "");
+
+    if (!cleanMsg) {
+      return res.status(400).json({ error: "Message content cannot be empty" });
+    }
+
+    if (!activeChatId) {
+      // Local broadcast fallback when not connected to a live stream ID
+      const localMsg = {
+        id: `msg-server-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        sender: req.body.sender || "DroidBot",
+        content: cleanMsg,
+        senderRole: req.body.senderRole || "bot",
+        timestamp: new Date().toLocaleTimeString(),
+        isBot: true
+      };
+      chatMessagesQueue = [...chatMessagesQueue, localMsg].slice(-200);
+      return res.json({ success: true, localOnly: true, message: localMsg });
+    }
+
+    if (!token) {
+      return res.status(401).json({ error: "YouTube OAuth access token is required to post to live chat." });
+    }
+
+    try {
+      const response = await fetch(
+        "https://www.googleapis.com/youtube/v3/liveChat/messages?part=snippet",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            snippet: {
+              liveChatId: activeChatId,
+              type: "textMessageEvent",
+              textMessageDetails: {
+                messageText: cleanMsg
+              }
+            }
+          })
+        }
+      );
+
+      const data = await response.json();
+      if (data.error) {
+        console.error("[YouTube LiveChat Send Error]", data.error);
+        return res.status(response.status).json({ error: data.error.message || "YouTube API error" });
+      }
+
+      // Add to local queue as well
+      const sentMsg = {
+        id: data.id || `yt-${Date.now()}`,
+        sender: req.body.sender || data.snippet?.authorDetails?.displayName || "DroidBot",
+        content: cleanMsg,
+        senderRole: "bot",
+        timestamp: new Date().toLocaleTimeString(),
+        isBot: true
+      };
+      chatMessagesQueue = [...chatMessagesQueue, sentMsg].slice(-200);
+
+      return res.json({ success: true, item: data });
+    } catch (err: any) {
+      console.error("[YouTube LiveChat Network Error]", err);
+      return res.status(500).json({ error: err.message || "Failed to send chat message" });
+    }
+  });
+
 
   // YouTube Stream Status & Broadcaster Listener Info
   app.get("/api/youtube/status", (_req, res) => {

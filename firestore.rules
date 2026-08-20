@@ -8,7 +8,7 @@ service cloud.firestore {
 
     // --- Helper Functions ---
     function isSignedIn() {
-      return request.auth != null && request.auth.token.email_verified == true;
+      return request.auth != null;
     }
 
     function isOwner(userId) {
@@ -21,6 +21,7 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
+
 
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
@@ -149,7 +150,7 @@ service cloud.firestore {
     
     match /alerts/{alertId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isSignedIn() || isAdmin();
     }
     
     match /admins/{adminId} {

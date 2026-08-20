@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { Tv, Play, RefreshCw, Check, Zap, Sparkles, Image, Volume2, ShieldCheck } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Tv, RefreshCw, Zap, Sparkles, Image, ShieldAlert, CheckCircle2 } from 'lucide-react';
 import { ObsWebSocketConfig } from '../types';
 import { playSynthesizedSound } from '../services/soundService';
+import { obsService } from '../services/obsService';
 
 interface ObsControlTabProps {
   obsConfig: ObsWebSocketConfig;
@@ -16,36 +17,76 @@ export const ObsControlTab: React.FC<ObsControlTabProps> = ({
   onSaveNotice,
   onSendLog
 }) => {
-  const [host, setHost] = useState(obsConfig.host);
-  const [port, setPort] = useState(obsConfig.port);
+  const [host, setHost] = useState(obsConfig.host || 'localhost');
+  const [port, setPort] = useState(obsConfig.port || 4455);
   const [password, setPassword] = useState(obsConfig.password || '');
   const [isConnecting, setIsConnecting] = useState(false);
   const [activeOverlayGif, setActiveOverlayGif] = useState<string | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
-  const handleToggleConnect = () => {
-    setIsConnecting(true);
-    setTimeout(() => {
-      const nextState = !obsConfig.connected;
-      setObsConfig((prev) => ({
+  // Sync external obsConfig updates into local inputs if changed
+  useEffect(() => {
+    if (obsConfig.host) setHost(obsConfig.host);
+    if (obsConfig.port) setPort(obsConfig.port);
+    if (obsConfig.password !== undefined) setPassword(obsConfig.password);
+  }, [obsConfig.host, obsConfig.port, obsConfig.password]);
+
+  // Subscribe to real-time obsService status
+  useEffect(() => {
+    const unsubStatus = obsService.subscribeStatus((connected, currentScene, scenes) => {
+      setObsConfig(prev => ({
         ...prev,
-        connected: nextState,
-        host,
-        port: Number(port) || 4455,
-        password
+        connected,
+        currentScene: currentScene || prev.currentScene,
+        scenes: scenes.length > 0 ? scenes : prev.scenes
       }));
+    });
+
+    const unsubLogs = obsService.subscribeLogs((level, msg) => {
+      onSendLog(level, 'OBS', msg);
+    });
+
+    return () => {
+      unsubStatus();
+      unsubLogs();
+    };
+  }, [setObsConfig, onSendLog]);
+
+  const handleToggleConnect = async () => {
+    setConnectionError(null);
+    setIsConnecting(true);
+
+    const updatedConfig: ObsWebSocketConfig = {
+      ...obsConfig,
+      host,
+      port: Number(port) || 4455,
+      password
+    };
+    setObsConfig(updatedConfig);
+    onSaveNotice();
+
+    if (obsConfig.connected) {
+      await obsService.disconnect();
       setIsConnecting(false);
-      onSendLog(
-        nextState ? 'success' : 'warn',
-        'OBS',
-        nextState ? `OBS WebSocket connected to ws://${host}:${port}` : 'OBS WebSocket disconnected.'
-      );
-      onSaveNotice();
-    }, 600);
+      onSendLog('warn', 'OBS', 'Disconnected from OBS Studio WebSocket.');
+    } else {
+      const result = await obsService.connect(host, Number(port) || 4455, password);
+      setIsConnecting(false);
+      if (!result.success) {
+        setConnectionError(result.error || 'Failed to connect. Check OBS WebSocket settings.');
+      } else {
+        setConnectionError(null);
+      }
+    }
   };
 
-  const handleSwitchScene = (scene: string) => {
-    setObsConfig((prev) => ({ ...prev, currentScene: scene }));
-    onSendLog('info', 'OBS', `Switched OBS scene to "${scene}"`);
+  const handleSwitchScene = async (scene: string) => {
+    if (obsConfig.connected) {
+      await obsService.setScene(scene);
+    } else {
+      setObsConfig((prev) => ({ ...prev, currentScene: scene }));
+      onSendLog('info', 'OBS', `(Simulation) Switched OBS scene to "${scene}"`);
+    }
     onSaveNotice();
   };
 
@@ -56,6 +97,17 @@ export const ObsControlTab: React.FC<ObsControlTabProps> = ({
     setTimeout(() => {
       setActiveOverlayGif(null);
     }, durationMs);
+  };
+
+  const handleSaveCredentials = () => {
+    setObsConfig(prev => ({
+      ...prev,
+      host,
+      port: Number(port) || 4455,
+      password
+    }));
+    onSaveNotice();
+    onSendLog('info', 'OBS', 'Saved OBS credentials to cloud & local workspace.');
   };
 
   return (
@@ -69,7 +121,7 @@ export const ObsControlTab: React.FC<ObsControlTabProps> = ({
           <div>
             <h2 className="text-base font-bold text-white">OBS Studio WebSocket Bridge</h2>
             <p className="text-xs text-slate-400">
-              Directly stream sound effects, GIF overlays, and scene transitions into OBS Studio
+              Directly control OBS Studio scenes, sound effects, and overlays via WebSocket v5
             </p>
           </div>
         </div>
@@ -82,7 +134,7 @@ export const ObsControlTab: React.FC<ObsControlTabProps> = ({
               }`}
             />
             <span className="text-slate-200 font-semibold">
-              {obsConfig.connected ? 'OBS Linked' : 'Disconnected'}
+              {obsConfig.connected ? 'OBS Live Connected' : 'Disconnected'}
             </span>
           </div>
 
@@ -96,20 +148,42 @@ export const ObsControlTab: React.FC<ObsControlTabProps> = ({
             }`}
           >
             <RefreshCw className={`w-4 h-4 ${isConnecting ? 'animate-spin' : ''}`} />
-            <span>{obsConfig.connected ? 'Disconnect OBS' : 'Connect to OBS'}</span>
+            <span>{obsConfig.connected ? 'Disconnect OBS' : (isConnecting ? 'Connecting...' : 'Connect to OBS')}</span>
           </button>
         </div>
       </div>
+
+      {connectionError && (
+        <div className="bg-rose-950/40 border border-rose-500/50 rounded-2xl p-4 text-xs text-rose-300 flex items-center gap-3">
+          <ShieldAlert className="w-5 h-5 flex-shrink-0 text-rose-400" />
+          <div>
+            <strong className="block font-semibold">OBS Connection Error:</strong>
+            <span>{connectionError}</span>
+            <p className="text-[11px] text-rose-400/80 mt-1">
+              Ensure OBS is open, <strong>Tools → WebSocket Server Settings</strong> is enabled, Server Port matches ({port}), and if a password is set, it matches. Note: If accessing from an external browser, check firewall/LAN access.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left: WebSocket Config & Scene Switcher (7 cols) */}
         <div className="lg:col-span-7 space-y-5">
           {/* Connection Settings */}
           <div className="bg-slate-900/90 border border-slate-800/90 rounded-2xl p-5 shadow-xl space-y-4 text-xs">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2 pb-2 border-b border-slate-800">
-              <Zap className="w-4 h-4 text-rose-400" />
-              <span>OBS WebSocket Server Credentials</span>
-            </h3>
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Zap className="w-4 h-4 text-rose-400" />
+                <span>OBS WebSocket Server Credentials</span>
+              </h3>
+              <button
+                onClick={handleSaveCredentials}
+                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Save Credentials</span>
+              </button>
+            </div>
 
             <div className="grid grid-cols-3 gap-3">
               <div className="col-span-2">
@@ -118,8 +192,9 @@ export const ObsControlTab: React.FC<ObsControlTabProps> = ({
                   type="text"
                   value={host}
                   onChange={(e) => setHost(e.target.value)}
+                  onBlur={handleSaveCredentials}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500 font-mono"
-                  placeholder="localhost"
+                  placeholder="localhost or 192.168.1.X"
                 />
               </div>
 
@@ -129,6 +204,7 @@ export const ObsControlTab: React.FC<ObsControlTabProps> = ({
                   type="number"
                   value={port}
                   onChange={(e) => setPort(Number(e.target.value))}
+                  onBlur={handleSaveCredentials}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500 font-mono"
                   placeholder="4455"
                 />
@@ -141,11 +217,12 @@ export const ObsControlTab: React.FC<ObsControlTabProps> = ({
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                onBlur={handleSaveCredentials}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500 font-mono"
-                placeholder="••••••••"
+                placeholder="•••••••• (leave empty if none)"
               />
               <p className="text-[10px] text-slate-500 mt-1">
-                Configured inside OBS Studio: <em>Tools → WebSocket Server Settings (Port 4455)</em>.
+                Configured inside OBS Studio: <em>Tools → WebSocket Server Settings (Default Port 4455)</em>.
               </p>
             </div>
           </div>
@@ -157,7 +234,7 @@ export const ObsControlTab: React.FC<ObsControlTabProps> = ({
                 <Tv className="w-4 h-4 text-blue-400" />
                 <span>Live Scene Switcher</span>
               </span>
-              <span className="text-slate-400">Current: <strong className="text-emerald-400">{obsConfig.currentScene}</strong></span>
+              <span className="text-slate-400">Current: <strong className="text-emerald-400">{obsConfig.currentScene || 'None'}</strong></span>
             </h3>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -199,10 +276,8 @@ export const ObsControlTab: React.FC<ObsControlTabProps> = ({
 
           {/* Visual Monitor Canvas */}
           <div className="relative aspect-video rounded-xl bg-slate-950 border border-slate-800 overflow-hidden flex items-center justify-center">
-            {/* Stream backdrop simulation */}
             <div className="absolute inset-0 bg-gradient-to-tr from-slate-950 via-slate-900 to-indigo-950/40 opacity-80" />
 
-            {/* Active overlay GIF or placeholder */}
             {activeOverlayGif ? (
               <div className="relative z-10 flex flex-col items-center animate-bounce">
                 <img
@@ -219,7 +294,7 @@ export const ObsControlTab: React.FC<ObsControlTabProps> = ({
                 <Tv className="w-8 h-8 text-slate-700 mx-auto" />
                 <p className="text-xs text-slate-500 font-medium">
                   {obsConfig.connected
-                    ? `Displaying Scene: [${obsConfig.currentScene}]`
+                    ? `OBS Connected: [${obsConfig.currentScene}]`
                     : 'OBS Canvas Standing By'}
                 </p>
                 <span className="inline-block text-[10px] text-slate-600 bg-slate-900 px-2 py-1 rounded-md">
@@ -258,3 +333,4 @@ export const ObsControlTab: React.FC<ObsControlTabProps> = ({
     </div>
   );
 };
+

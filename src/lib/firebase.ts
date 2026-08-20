@@ -1,6 +1,7 @@
-import { initializeApp, FirebaseApp } from 'firebase/app';
+import { initializeApp, FirebaseApp, getApps, getApp } from 'firebase/app';
 import { getAuth, Auth, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
+import localConfig from '../../firebase-applet-config.json';
 
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
@@ -23,17 +24,9 @@ export const initFirebase = async (): Promise<{ auth: Auth; db: Firestore } | nu
         appId: import.meta.env.VITE_FIREBASE_APP_ID,
         firestoreDatabaseId: import.meta.env.VITE_FIREBASE_DATABASE_ID
       };
-    } 
-    
-    // 2. Fallback to local config file (for AI Studio preview ONLY)
-    if (!config) {
-      try {
-        const configPath = '../../firebase-applet-config.json';
-        const localConfig = await import(/* @vite-ignore */ configPath);
-        config = localConfig.default || localConfig;
-      } catch (e) {
-        console.warn("Could not load AI Studio local firebase config");
-      }
+    } else if (localConfig && localConfig.apiKey) {
+      // 2. Local config from project root
+      config = localConfig;
     }
 
     if (!config || !config.apiKey) {
@@ -41,11 +34,20 @@ export const initFirebase = async (): Promise<{ auth: Auth; db: Firestore } | nu
        return null;
     }
 
-    app = initializeApp(config);
+    if (getApps().length === 0) {
+      app = initializeApp(config);
+    } else {
+      app = getApp();
+    }
+    
     auth = getAuth(app);
     
     // Set persistence to LOCAL
-    await setPersistence(auth, browserLocalPersistence);
+    try {
+      await setPersistence(auth, browserLocalPersistence);
+    } catch (e) {
+      console.warn("Could not set local persistence:", e);
+    }
     
     // Explicitly connect to the named database if provided, otherwise default
     if (config.firestoreDatabaseId) {
@@ -56,7 +58,8 @@ export const initFirebase = async (): Promise<{ auth: Auth; db: Firestore } | nu
     
     return { auth, db };
   } catch (error) {
-    console.warn('Firebase configuration missing or invalid. Cloud features will be disabled.', error);
+    console.warn('Firebase configuration error:', error);
     return null;
   }
 };
+

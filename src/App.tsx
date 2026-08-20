@@ -25,7 +25,7 @@ import { SettingsTab } from './components/SettingsTab';
 import { ShoutoutsTab } from './components/ShoutoutsTab';
 import { ShoutoutOverlayWidget } from './components/ShoutoutOverlayWidget';
 import { Overlay } from './components/Overlay';
-import { initAuth } from './lib/googleAuth';
+import { initAuth, getAccessToken } from './lib/googleAuth';
 import { saveStateToCloud, loadStateFromCloud } from './lib/cloudSync';
 import { User } from 'firebase/auth';
 import { CloudBackupTab } from './components/CloudBackupTab';
@@ -65,18 +65,42 @@ import {
   ShoutoutConfig,
   ShoutoutHistoryItem,
   ActiveShoutoutOverlay,
-  ViewerProfile
+  ViewerProfile,
+  BotIdentity,
+  ViewerRoleConfig,
+  TriggerRule,
+  PointsSystemConfig,
+  AchievementDefinition,
+  GameState,
+  SoundEffectItem,
+  ObsWebSocketConfig,
+  AutomationTask,
+  AudioQueueItem
 } from './types';
 import { processIncomingMessage, queryAiEngine, checkAchievementProgress } from './services/botEngine';
 import { playSynthesizedSound, playCustomAudioUrl } from './services/soundService';
+
+const getInitialSavedState = () => {
+  try {
+    const saved = localStorage.getItem('droidos_state');
+    if (saved) {
+      return JSON.parse(saved);
+    }
+  } catch (e) {
+    console.warn('[DroidOS State Load]', e);
+  }
+  return null;
+};
 
 export const App: React.FC = () => {
   if (window.location.pathname === '/overlay') {
     return <Overlay />;
   }
 
+  const savedState = getInitialSavedState();
+
   const [activeTab, setActiveTab] = useState<string>('dashboard');
-  const [theme, setTheme] = useState<AppTheme>('dark');
+  const [theme, setTheme] = useState<AppTheme>(() => savedState?.theme || 'dark');
   const [isFirebaseConfigured, setIsFirebaseConfigured] = useState<boolean>(false);
 
   useEffect(() => {
@@ -86,7 +110,7 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  const [tabOrder, setTabOrder] = useState<string[]>([
+  const [tabOrder, setTabOrder] = useState<string[]>(() => savedState?.tabOrder || [
     'dashboard',
     'liveviewer',
     'personalities',
@@ -111,25 +135,35 @@ export const App: React.FC = () => {
     'settings'
   ]);
 
-  // Core Data States
-  const [botIdentity, setBotIdentity] = useState(INITIAL_BOT_IDENTITY);
-  const [roles, setRoles] = useState(INITIAL_ROLES);
-  const [profiles, setProfiles] = useState(INITIAL_PROFILES);
+  // Core Data States - Hydrated eagerly on render #1 from localStorage to prevent data loss
+  const [botIdentity, setBotIdentity] = useState<BotIdentity>(() =>
+    savedState?.botIdentity ? { ...INITIAL_BOT_IDENTITY, ...savedState.botIdentity } : INITIAL_BOT_IDENTITY
+  );
+  const [roles, setRoles] = useState<ViewerRoleConfig[]>(() => savedState?.roles || INITIAL_ROLES);
+  const [profiles, setProfiles] = useState<ViewerProfile[]>(() => savedState?.profiles || INITIAL_PROFILES);
   const [responseStyles, setResponseStyles] = useState<
     Record<PersonalityResponseType, ResponseStyleDefinition>
-  >(INITIAL_RESPONSE_STYLES);
-  const [triggers, setTriggers] = useState(INITIAL_TRIGGERS);
-  const [pointsConfig, setPointsConfig] = useState(INITIAL_POINTS_CONFIG);
-  const [achievements, setAchievements] = useState(INITIAL_ACHIEVEMENTS);
-  const [gameState, setGameState] = useState(INITIAL_GAME_STATE);
+  >(() => savedState?.responseStyles || INITIAL_RESPONSE_STYLES);
+  const [triggers, setTriggers] = useState<TriggerRule[]>(() => savedState?.triggers || INITIAL_TRIGGERS);
+  const [pointsConfig, setPointsConfig] = useState<PointsSystemConfig>(() =>
+    savedState?.pointsConfig ? { ...INITIAL_POINTS_CONFIG, ...savedState.pointsConfig } : INITIAL_POINTS_CONFIG
+  );
+  const [achievements, setAchievements] = useState<AchievementDefinition[]>(() => savedState?.achievements || INITIAL_ACHIEVEMENTS);
+  const [gameState, setGameState] = useState<GameState>(() =>
+    savedState?.gameState ? { ...INITIAL_GAME_STATE, ...savedState.gameState } : INITIAL_GAME_STATE
+  );
   const [activeDuel, setActiveDuel] = useState<{ challenger: string; target: string; amount: number } | null>(null);
-  const [soundEffects, setSoundEffects] = useState(INITIAL_SOUND_EFFECTS);
-  const [redeems, setRedeems] = useState(INITIAL_REDEEMS);
-  const [obsConfig, setObsConfig] = useState(INITIAL_OBS_CONFIG);
-  const [automations, setAutomations] = useState(INITIAL_AUTOMATIONS);
+  const [soundEffects, setSoundEffects] = useState<SoundEffectItem[]>(() => savedState?.soundEffects || INITIAL_SOUND_EFFECTS);
+  const [redeems, setRedeems] = useState<RedeemItem[]>(() => savedState?.redeems || INITIAL_REDEEMS);
+  const [obsConfig, setObsConfig] = useState<ObsWebSocketConfig>(() =>
+    savedState?.obsConfig ? { ...INITIAL_OBS_CONFIG, ...savedState.obsConfig } : INITIAL_OBS_CONFIG
+  );
+  const [automations, setAutomations] = useState<AutomationTask[]>(() => savedState?.automations || INITIAL_AUTOMATIONS);
   const [streamMetadata, setStreamMetadata] = useState<StreamLiveMetadata>(INITIAL_STREAM_METADATA);
   const [releaseInfo, setReleaseInfo] = useState(INITIAL_RELEASE_INFO);
-  const [shoutoutConfig, setShoutoutConfig] = useState<ShoutoutConfig>(INITIAL_SHOUTOUT_CONFIG);
+  const [shoutoutConfig, setShoutoutConfig] = useState<ShoutoutConfig>(() =>
+    savedState?.shoutoutConfig ? { ...INITIAL_SHOUTOUT_CONFIG, ...savedState.shoutoutConfig } : INITIAL_SHOUTOUT_CONFIG
+  );
   const [shoutoutHistory, setShoutoutHistory] = useState<ShoutoutHistoryItem[]>(INITIAL_SHOUTOUT_HISTORY);
   const [activeShoutout, setActiveShoutout] = useState<ActiveShoutoutOverlay | null>(null);
   const [audioQueue, setAudioQueue] = useState<AudioQueueItem[]>([]);
@@ -139,7 +173,7 @@ export const App: React.FC = () => {
   const [isListening, setIsListening] = useState<boolean>(true);
   const [isLive, setIsLive] = useState<boolean>(true);
   const [uptimeSeconds, setUptimeSeconds] = useState<number>(3600);
-  const [simulatedTraffic, setSimulatedTraffic] = useState<boolean>(true);
+  const [simulatedTraffic, setSimulatedTraffic] = useState<boolean>(false);
 
   // Modals
   const [showConfig, setShowConfig] = useState<boolean>(false);
@@ -155,33 +189,40 @@ export const App: React.FC = () => {
   const [saveNotification, setSaveNotification] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
-  
+  const isHydratedRef = useRef(false);
+
+  useEffect(() => {
+    isHydratedRef.current = true;
+  }, []);
+
   useEffect(() => {
     const unsubscribe = initAuth((user) => {
       setCurrentUser(user);
-      // Load cloud state on login
-      setIsCloudSyncing(true);
-      loadStateFromCloud().then((parsed) => {
-        if (parsed) {
-          if (parsed.botIdentity) setBotIdentity(prev => ({ ...prev, ...parsed.botIdentity }));
-          if (parsed.roles) setRoles(parsed.roles);
-          if (parsed.profiles) setProfiles(parsed.profiles);
-          if (parsed.triggers) setTriggers(parsed.triggers);
-          if (parsed.pointsConfig) setPointsConfig(parsed.pointsConfig);
-          if (parsed.achievements) setAchievements(parsed.achievements);
-          if (parsed.soundEffects) setSoundEffects(parsed.soundEffects);
-          if (parsed.redeems) setRedeems(parsed.redeems);
-          if (parsed.obsConfig) setObsConfig(parsed.obsConfig);
-          if (parsed.tabOrder) {
-            setTabOrder(Array.from(new Set([...parsed.tabOrder, 'obs-overlay'])));
+      if (user) {
+        // Load cloud state on login
+        setIsCloudSyncing(true);
+        loadStateFromCloud().then((parsed) => {
+          if (parsed) {
+            if (parsed.botIdentity) setBotIdentity(prev => ({ ...prev, ...parsed.botIdentity }));
+            if (parsed.roles) setRoles(parsed.roles);
+            if (parsed.profiles) setProfiles(parsed.profiles);
+            if (parsed.triggers) setTriggers(parsed.triggers);
+            if (parsed.pointsConfig) setPointsConfig(parsed.pointsConfig);
+            if (parsed.achievements) setAchievements(parsed.achievements);
+            if (parsed.soundEffects) setSoundEffects(parsed.soundEffects);
+            if (parsed.redeems) setRedeems(parsed.redeems);
+            if (parsed.obsConfig) setObsConfig(parsed.obsConfig);
+            if (parsed.tabOrder) {
+              setTabOrder(Array.from(new Set([...parsed.tabOrder, 'obs-overlay'])));
+            }
+            if (parsed.theme) setTheme(parsed.theme);
+            if (parsed.shoutoutConfig) setShoutoutConfig(parsed.shoutoutConfig);
+            if (parsed.gameState) setGameState(parsed.gameState);
+            showToast('Settings synced from cloud workspace');
           }
-          if (parsed.theme) setTheme(parsed.theme);
-          if (parsed.shoutoutConfig) setShoutoutConfig(parsed.shoutoutConfig);
-          if (parsed.gameState) setGameState(parsed.gameState);
-          showToast('State Synced from Cloud');
-        }
-        setIsCloudSyncing(false);
-      });
+          setIsCloudSyncing(false);
+        });
+      }
     }, () => {
       setCurrentUser(null);
     });
@@ -234,33 +275,9 @@ export const App: React.FC = () => {
     }
   ]);
 
-  // --- Persistence Layer ---
+  // --- Persistence Layer (Safely saves changes to localStorage and Cloud) ---
   useEffect(() => {
-    const saved = localStorage.getItem('droidos_state');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed.botIdentity) setBotIdentity(prev => ({ ...prev, ...parsed.botIdentity }));
-        if (parsed.roles) setRoles(parsed.roles);
-        if (parsed.profiles) setProfiles(parsed.profiles);
-        if (parsed.triggers) setTriggers(parsed.triggers);
-        if (parsed.pointsConfig) setPointsConfig(parsed.pointsConfig);
-        if (parsed.achievements) setAchievements(parsed.achievements);
-        if (parsed.soundEffects) setSoundEffects(parsed.soundEffects);
-        if (parsed.redeems) setRedeems(parsed.redeems);
-        if (parsed.obsConfig) setObsConfig(parsed.obsConfig);
-        if (parsed.tabOrder) setTabOrder(Array.from(new Set([...parsed.tabOrder, 'obs-overlay'])));
-        if (parsed.theme) setTheme(parsed.theme);
-        if (parsed.shoutoutConfig) setShoutoutConfig(parsed.shoutoutConfig);
-        if (parsed.gameState) setGameState(parsed.gameState);
-      } catch (e) {
-        console.warn('[DroidOS Persistence] Failed to restore state:', e);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    if (isCloudSyncing) return;
+    if (!isHydratedRef.current || isCloudSyncing) return;
     const stateToSave = {
       botIdentity,
       roles,
@@ -287,6 +304,7 @@ export const App: React.FC = () => {
       saveStateToCloud(stateToSave);
     }
   }, [botIdentity, roles, profiles, triggers, pointsConfig, achievements, soundEffects, redeems, obsConfig, tabOrder, theme, shoutoutConfig, gameState, currentUser, isCloudSyncing]);
+
 
   const greetedUsersRef = useRef<Set<string>>(new Set(['channelowner']));
 
@@ -682,17 +700,61 @@ export const App: React.FC = () => {
     [shoutoutConfig, profiles, botIdentity, addLog]
   );
 
+  // Centralized Bot Reply Dispatcher (Local chat feed + Live YouTube chat broadcasting)
+  const dispatchBotReply = useCallback(
+    (replyText: string, matchedRule?: string, isAi?: boolean) => {
+      const botMsg: ChatMessage = {
+        id: `msg-bot-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        sender: botIdentity.botName,
+        senderRole: 'bot',
+        isBot: true,
+        isAiResponse: !!isAi,
+        content: replyText,
+        timestamp: new Date().toLocaleTimeString(),
+        matchedRule
+      };
+      setMessages((prev) => [...prev, botMsg]);
+      addLog('bot', isAi ? 'AI_ENGINE' : 'ROLES', `Dispatched reply [${matchedRule || 'bot'}]: "${replyText}"`);
+
+      // Relay reply to YouTube Live Chat
+      const token = getAccessToken();
+      fetch('/api/youtube/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          message: replyText,
+          sender: botIdentity.botName,
+          senderRole: 'bot',
+          liveChatId: streamMetadata.activeLiveChatId,
+          accessToken: token
+        })
+      }).catch((e) => console.warn('[YouTube Chat Send Warning]', e));
+    },
+    [botIdentity.botName, streamMetadata.activeLiveChatId, addLog]
+  );
+
   // Incoming Message Handler
   const handleIncomingMessage = useCallback(
     async (sender: string, content: string, explicitRole?: string) => {
       const now = new Date().toLocaleTimeString();
-      const safeSender = (typeof sender === 'string') ? sender : 'Anonymous';
+      const safeSender = typeof sender === 'string' ? sender : 'Anonymous';
       const senderKey = safeSender.trim().toLowerCase();
 
-      let role = explicitRole || 'viewer';
+      // Detect if chatter is the streamer / channel owner
+      const isStreamer =
+        explicitRole === 'owner' ||
+        senderKey === botIdentity.streamerName.trim().toLowerCase() ||
+        senderKey === botIdentity.channelName.replace('@', '').trim().toLowerCase() ||
+        senderKey === (streamMetadata.streamerAuth?.accountName || '').trim().toLowerCase() ||
+        senderKey === (currentUser?.displayName || '').trim().toLowerCase();
+
+      let role = isStreamer ? 'owner' : (explicitRole || 'viewer');
       const foundProfile = profiles.find((p) => p.username.toLowerCase() === senderKey);
       if (foundProfile) {
-        role = explicitRole || foundProfile.role;
+        role = isStreamer ? 'owner' : (explicitRole || foundProfile.role);
       }
 
       const userMsg: ChatMessage = {
@@ -737,12 +799,12 @@ export const App: React.FC = () => {
             username: safeSender.trim(),
             displayName: safeSender.trim(),
             role,
-            moderationLevel: 0 as const,
+            moderationLevel: isStreamer ? 4 : 0,
             points: starterPoints,
             totalPointsEarned: starterPoints,
             watchTimeMinutes: 1,
-            customFacts: ['New community chatter in live stream'],
-            notes: 'Auto-registered profile with active inventory system.',
+            customFacts: isStreamer ? ['Streamer & Broadcaster of this channel'] : ['New community chatter in live stream'],
+            notes: isStreamer ? 'Verified Broadcaster Account.' : 'Auto-registered profile with active inventory system.',
             firstSeen: new Date().toISOString().split('T')[0],
             lastSeen: 'Just now',
             messageCount: 1,
@@ -751,17 +813,17 @@ export const App: React.FC = () => {
               {
                 id: `mem-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
                 timestamp: new Date().toISOString().split('T')[0],
-                fact: 'Joined live stream and initialized personal inventory.',
+                fact: isStreamer ? 'Started streaming on channel.' : 'Joined live stream and initialized personal inventory.',
                 addedBy: 'auto'
               }
             ],
             inventory: [
               {
                 id: `inv-${Date.now()}-starter-${Math.random().toString(36).substring(2, 8)}`,
-                name: '🌱 Welcome Explorer Badge',
+                name: isStreamer ? '👑 Broadcaster Crown' : '🌱 Welcome Explorer Badge',
                 type: 'badge',
-                description: 'Awarded automatically upon entering chat for the first time',
-                icon: '🌱',
+                description: isStreamer ? 'Awarded to the live stream creator' : 'Awarded automatically upon entering chat for the first time',
+                icon: isStreamer ? '👑' : '🌱',
                 acquiredAt: new Date().toISOString().split('T')[0]
               }
             ],
@@ -772,20 +834,20 @@ export const App: React.FC = () => {
                 progress: 1
               }
             ],
-            avatarColor: 'from-blue-600 to-indigo-600'
+            avatarColor: isStreamer ? 'from-amber-500 to-rose-600' : 'from-blue-600 to-indigo-600'
           };
-          addLog('success', 'SYSTEM', `Created new viewer profile & inventory for @${safeSender.trim()}`);
+          addLog('success', 'SYSTEM', `Created new viewer profile & inventory for @${safeSender.trim()} (${role})`);
           return [...prev, newViewer];
         }
       });
 
-      addLog('info', 'LISTENER', `Received message from [${sender}] (${role}): "${content}"`);
+      addLog('info', 'LISTENER', `Received message from [${safeSender.trim()}] (${role}): "${content}"`);
 
       // Check Bot Dispatch
       if (isListening && botIdentity.status === 'active') {
         const hasGreeted = greetedUsersRef.current.has(senderKey);
         const result = processIncomingMessage(
-          { sender, content, role },
+          { sender: safeSender.trim(), content, role },
           {
             botIdentity,
             roles,
@@ -810,68 +872,39 @@ export const App: React.FC = () => {
           }
 
           greetedUsersRef.current.add(senderKey);
-          
+
           // Handle Game Commands (!gamble, !heist, etc)
           if (result.gameCommand) {
             const { type, amount, target } = result.gameCommand;
-            const profile = profiles.find(p => p.username.toLowerCase() === sender.toLowerCase());
+            const profile = profiles.find(p => p.username.toLowerCase() === safeSender.toLowerCase());
             const userPoints = profile?.points || 0;
 
             if (type === 'coinpush') {
               if (!amount || userPoints < amount) {
-                setMessages(prev => [...prev, {
-                  id: `msg-game-${Date.now()}`,
-                  sender: botIdentity.botName,
-                  senderRole: 'bot',
-                  content: `⚠️ @${sender}, you don't have enough ${pointsConfig.currencyName} to drop into the pusher!`,
-                  timestamp: new Date().toLocaleTimeString(),
-                  isBot: true
-                }]);
+                dispatchBotReply(`⚠️ @${safeSender}, you don't have enough ${pointsConfig.currencyName} to drop into the pusher!`, 'Game Error');
                 return;
               }
 
               const tipChance = gameState.config.coinPushTipChance / 100;
               const willTip = Math.random() < tipChance;
               
-              setProfiles(prev => prev.map(p => p.username.toLowerCase() === sender.toLowerCase() ? { ...p, points: p.points - amount } : p));
+              setProfiles(prev => prev.map(p => p.username.toLowerCase() === safeSender.toLowerCase() ? { ...p, points: p.points - amount } : p));
               
               if (willTip) {
                 const totalWin = gameState.pusherPool + amount;
-                setProfiles(prev => prev.map(p => p.username.toLowerCase() === sender.toLowerCase() ? { ...p, points: p.points + totalWin } : p));
+                setProfiles(prev => prev.map(p => p.username.toLowerCase() === safeSender.toLowerCase() ? { ...p, points: p.points + totalWin } : p));
                 setGameState(prev => ({ ...prev, pusherPool: 0 }));
-                
-                setMessages(prev => [...prev, {
-                  id: `msg-game-${Date.now()}`,
-                  sender: botIdentity.botName,
-                  senderRole: 'bot',
-                  content: `🎰 CLINK! @${sender} dropped ${amount} into the pusher and IT TIPPED! 🏆 They won the entire pool of ${totalWin} ${pointsConfig.currencyName}!`,
-                  timestamp: new Date().toLocaleTimeString(),
-                  isBot: true
-                }]);
+                dispatchBotReply(`🎰 CLINK! @${safeSender} dropped ${amount} into the pusher and IT TIPPED! 🏆 They won the entire pool of ${totalWin} ${pointsConfig.currencyName}!`, 'Game [CoinPusher]');
               } else {
                 setGameState(prev => ({ ...prev, pusherPool: prev.pusherPool + amount }));
-                setMessages(prev => [...prev, {
-                  id: `msg-game-${Date.now()}`,
-                  sender: botIdentity.botName,
-                  senderRole: 'bot',
-                  content: `🪙 @${sender} dropped ${amount} into the pusher... it creaks, but doesn't tip yet! Pool is now: ${gameState.pusherPool + amount}`,
-                  timestamp: new Date().toLocaleTimeString(),
-                  isBot: true
-                }]);
+                dispatchBotReply(`🪙 @${safeSender} dropped ${amount} into the pusher... it creaks, but doesn't tip yet! Pool is now: ${gameState.pusherPool + amount}`, 'Game [CoinPusher]');
               }
               return;
             }
 
             if (type === 'gamble') {
               if (!amount || userPoints < amount) {
-                setMessages(prev => [...prev, {
-                  id: `msg-game-${Date.now()}`,
-                  sender: botIdentity.botName,
-                  senderRole: 'bot',
-                  content: `⚠️ @${sender}, you don't have enough ${pointsConfig.currencyName} to gamble that much!`,
-                  timestamp: new Date().toLocaleTimeString(),
-                  isBot: true
-                }]);
+                dispatchBotReply(`⚠️ @${safeSender}, you don't have enough ${pointsConfig.currencyName} to gamble that much!`, 'Game Error');
                 return;
               }
 
@@ -880,65 +913,38 @@ export const App: React.FC = () => {
               const winAmount = amount; 
               const newBal = win ? userPoints + winAmount : userPoints - amount;
 
-              setProfiles(prev => prev.map(p => p.username.toLowerCase() === sender.toLowerCase() ? { ...p, points: newBal } : p));
+              setProfiles(prev => prev.map(p => p.username.toLowerCase() === safeSender.toLowerCase() ? { ...p, points: newBal } : p));
               
-              setMessages(prev => [...prev, {
-                id: `msg-game-${Date.now()}`,
-                sender: botIdentity.botName,
-                senderRole: 'bot',
-                content: win 
-                  ? `🎰 @${sender} rolled a 100! YOU WIN ${winAmount} ${pointsConfig.currencyName}! New balance: ${newBal}`
-                  : `🎰 @${sender} rolled a 1... You lost ${amount} ${pointsConfig.currencyName}. Better luck next time!`,
-                timestamp: new Date().toLocaleTimeString(),
-                isBot: true
-              }]);
-              addLog('info', 'SYSTEM', `User @${sender} gambled ${amount} and ${win ? 'WON' : 'LOST'}`);
+              const text = win 
+                ? `🎰 @${safeSender} rolled a 100! YOU WIN ${winAmount} ${pointsConfig.currencyName}! New balance: ${newBal}`
+                : `🎰 @${safeSender} rolled a 1... You lost ${amount} ${pointsConfig.currencyName}. Better luck next time!`;
+              dispatchBotReply(text, 'Game [Gamble]');
+              addLog('info', 'SYSTEM', `User @${safeSender} gambled ${amount} and ${win ? 'WON' : 'LOST'}`);
               return;
             }
 
             if (type === 'heist') {
               if (!gameState.isHeistActive) {
-                setMessages(prev => [...prev, {
-                  id: `msg-game-${Date.now()}`,
-                  sender: botIdentity.botName,
-                  senderRole: 'bot',
-                  content: `⚠️ @${sender}, there is no heist currently active. Wait for the streamer to start one!`,
-                  timestamp: new Date().toLocaleTimeString(),
-                  isBot: true
-                }]);
+                dispatchBotReply(`⚠️ @${safeSender}, there is no heist currently active. Wait for the streamer to start one!`, 'Game Error');
                 return;
               }
 
               if (!amount || userPoints < amount) {
-                setMessages(prev => [...prev, {
-                  id: `msg-game-${Date.now()}`,
-                  sender: botIdentity.botName,
-                  senderRole: 'bot',
-                  content: `⚠️ @${sender}, you can't join the heist without enough ${pointsConfig.currencyName}!`,
-                  timestamp: new Date().toLocaleTimeString(),
-                  isBot: true
-                }]);
+                dispatchBotReply(`⚠️ @${safeSender}, you can't join the heist without enough ${pointsConfig.currencyName}!`, 'Game Error');
                 return;
               }
 
-              const alreadyIn = gameState.heistParticipants.some(p => p.username.toLowerCase() === sender.toLowerCase());
+              const alreadyIn = gameState.heistParticipants.some(p => p.username.toLowerCase() === safeSender.toLowerCase());
               if (alreadyIn) return;
 
               setGameState(prev => ({
                 ...prev,
-                heistParticipants: [...prev.heistParticipants, { username: sender, bid: amount }]
+                heistParticipants: [...prev.heistParticipants, { username: safeSender, bid: amount }]
               }));
               
-              setProfiles(prev => prev.map(p => p.username.toLowerCase() === sender.toLowerCase() ? { ...p, points: p.points - amount } : p));
+              setProfiles(prev => prev.map(p => p.username.toLowerCase() === safeSender.toLowerCase() ? { ...p, points: p.points - amount } : p));
 
-              setMessages(prev => [...prev, {
-                id: `msg-game-${Date.now()}`,
-                sender: botIdentity.botName,
-                senderRole: 'bot',
-                content: `💰 @${sender} joined the heist crew with ${amount} ${pointsConfig.currencyName}! Current crew: ${gameState.heistParticipants.length + 1}`,
-                timestamp: new Date().toLocaleTimeString(),
-                isBot: true
-              }]);
+              dispatchBotReply(`💰 @${safeSender} joined the heist crew with ${amount} ${pointsConfig.currencyName}! Current crew: ${gameState.heistParticipants.length + 1}`, 'Game [Heist]');
               return;
             }
 
@@ -952,28 +958,12 @@ export const App: React.FC = () => {
 
               if (newHP <= 0) {
                 setGameState(prev => ({ ...prev, isBossActive: false }));
-                setMessages(prev => [...prev, {
-                  id: `msg-game-${Date.now()}`,
-                  sender: botIdentity.botName,
-                  senderRole: 'bot',
-                  content: `🏆 BOOM! @${sender} landed the killing blow on [${gameState.bossName}]! The community is safe once more! Rewards granted.`,
-                  timestamp: new Date().toLocaleTimeString(),
-                  isBot: true
-                }]);
-                // Grant points to everyone who participated
+                dispatchBotReply(`🏆 BOOM! @${safeSender} landed the killing blow on [${gameState.bossName}]! The community is safe once more! Rewards granted.`, 'Game [Boss]');
                 const reward = gameState.config.bossKillReward;
-                setProfiles(prev => prev.map(p => p.username.toLowerCase() === sender.toLowerCase() ? { ...p, points: p.points + reward } : p));
+                setProfiles(prev => prev.map(p => p.username.toLowerCase() === safeSender.toLowerCase() ? { ...p, points: p.points + reward } : p));
               } else {
-                // Only respond sometimes to avoid spam
                 if (Math.random() > 0.8) {
-                  setMessages(prev => [...prev, {
-                    id: `msg-game-${Date.now()}`,
-                    sender: botIdentity.botName,
-                    senderRole: 'bot',
-                    content: `⚔️ @${sender} dealt ${dmg} DMG to ${gameState.bossName}! (${newHP} HP left)`,
-                    timestamp: new Date().toLocaleTimeString(),
-                    isBot: true
-                  }]);
+                  dispatchBotReply(`⚔️ @${safeSender} dealt ${dmg} DMG to ${gameState.bossName}! (${newHP} HP left)`, 'Game [Boss]');
                 }
               }
               return;
@@ -982,31 +972,17 @@ export const App: React.FC = () => {
             if (type === 'duel') {
               if (!target || !amount || userPoints < amount) return;
               
-              setActiveDuel({ challenger: sender, target, amount });
-              setMessages(prev => [...prev, {
-                id: `msg-game-${Date.now()}`,
-                sender: botIdentity.botName,
-                senderRole: 'bot',
-                content: `⚔️ @${sender} has challenged @${target} to a DUEL for ${amount} ${pointsConfig.currencyName}! Type "!accept" to fight!`,
-                timestamp: new Date().toLocaleTimeString(),
-                isBot: true
-              }]);
+              setActiveDuel({ challenger: safeSender, target, amount });
+              dispatchBotReply(`⚔️ @${safeSender} has challenged @${target} to a DUEL for ${amount} ${pointsConfig.currencyName}! Type "!accept" to fight!`, 'Game [Duel]');
               return;
             }
 
             if (type === 'accept_duel') {
-              if (!activeDuel || activeDuel.target.toLowerCase() !== sender.toLowerCase()) return;
+              if (!activeDuel || activeDuel.target.toLowerCase() !== safeSender.toLowerCase()) return;
               
               const challengerProfile = profiles.find(p => p.username.toLowerCase() === activeDuel.challenger.toLowerCase());
               if (!challengerProfile || challengerProfile.points < activeDuel.amount || userPoints < activeDuel.amount) {
-                setMessages(prev => [...prev, {
-                  id: `msg-game-${Date.now()}`,
-                  sender: botIdentity.botName,
-                  senderRole: 'bot',
-                  content: `⚠️ Duel cancelled: Someone ran out of ${pointsConfig.currencyName}!`,
-                  timestamp: new Date().toLocaleTimeString(),
-                  isBot: true
-                }]);
+                dispatchBotReply(`⚠️ Duel cancelled: Someone ran out of ${pointsConfig.currencyName}!`, 'Game [Duel]');
                 setActiveDuel(null);
                 return;
               }
@@ -1023,14 +999,7 @@ export const App: React.FC = () => {
                 return p;
               }));
 
-              setMessages(messages => [...messages, {
-                id: `msg-game-${Date.now()}`,
-                sender: botIdentity.botName,
-                senderRole: 'bot',
-                content: `⚔️ THE DUEL IS OVER! @${winner} defeated @${loser} and won ${prize} ${pointsConfig.currencyName}! ${houseCut > 0 ? `(House took ${activeDuel.amount - prize} cut)` : ''}`,
-                timestamp: new Date().toLocaleTimeString(),
-                isBot: true
-              }]);
+              dispatchBotReply(`⚔️ THE DUEL IS OVER! @${winner} defeated @${loser} and won ${prize} ${pointsConfig.currencyName}! ${houseCut > 0 ? `(House took ${activeDuel.amount - prize} cut)` : ''}`, 'Game [Duel]');
               setActiveDuel(null);
               return;
             }
@@ -1038,10 +1007,10 @@ export const App: React.FC = () => {
 
           // Handle AI Query (!ai how are you)
           if (result.isAiQuery && result.aiPrompt) {
-            addLog('bot', 'AI_ENGINE', `Routing AI prompt for @${sender} [${result.responseType || 'default'}]: "${result.aiPrompt}"`);
+            addLog('bot', 'AI_ENGINE', `Routing AI prompt for @${safeSender} [${result.responseType || 'default'}]: "${result.aiPrompt}"`);
             const aiResponse = await queryAiEngine(
               result.aiPrompt,
-              sender,
+              safeSender,
               botIdentity,
               result.responseType,
               result.memoryFacts
@@ -1050,25 +1019,14 @@ export const App: React.FC = () => {
             setAiEngineStatus({ status: aiResponse.status, error: aiResponse.error });
 
             setTimeout(() => {
-              const botMsg: ChatMessage = {
-                id: `msg-bot-ai-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-                sender: botIdentity.botName,
-                senderRole: 'bot',
-                isBot: true,
-                isAiResponse: true,
-                content: aiResponse.reply,
-                timestamp: new Date().toLocaleTimeString(),
-                matchedRule: result.matchedRule || `AI Command [${botIdentity.aiCommandPrefix}]`
-              };
-              setMessages((prev) => [...prev, botMsg]);
-              addLog('bot', 'AI_ENGINE', `Dispatched AI reply: "${aiResponse.reply}"`);
+              dispatchBotReply(aiResponse.reply, result.matchedRule || `AI Command [${botIdentity.aiCommandPrefix}]`, true);
             }, botIdentity.typingDelayMs || 400);
             return;
           }
 
           // Handle Redeem Trigger
           if (result.redeemedItem) {
-            handleRedeemItem(result.redeemedItem, sender);
+            handleRedeemItem(result.redeemedItem, safeSender);
             return;
           }
 
@@ -1101,35 +1059,31 @@ export const App: React.FC = () => {
           // Standard Bot Reply
           if (result.replyText) {
             setTimeout(() => {
-              const botMsg: ChatMessage = {
-                id: `msg-bot-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-                sender: botIdentity.botName,
-                senderRole: 'bot',
-                isBot: true,
-                content: result.replyText!,
-                timestamp: new Date().toLocaleTimeString(),
-                matchedRule: result.matchedRule
-              };
-              setMessages((prev) => [...prev, botMsg]);
-              addLog('bot', 'ROLES', `Dispatched response [${result.matchedRule}]: "${result.replyText}"`);
+              dispatchBotReply(result.replyText!, result.matchedRule);
             }, botIdentity.typingDelayMs || 400);
           }
         }
       }
     },
-    [profiles, isListening, botIdentity, roles, triggers, pointsConfig, achievements, redeems, soundEffects, uptimeSeconds, handleRedeemItem, addLog, shoutoutConfig, handleTriggerShoutout]
+    [profiles, isListening, botIdentity, roles, triggers, pointsConfig, achievements, redeems, soundEffects, uptimeSeconds, handleRedeemItem, addLog, shoutoutConfig, handleTriggerShoutout, dispatchBotReply, gameState, activeDuel, currentUser, streamMetadata]
   );
+
 
   // --- Real-time Chat Sync Poller ---
   useEffect(() => {
     if (!isLive || !isListening) return;
 
     let lastFetchedId: string | null = null;
-    const pollInterval = 4000; // 4 seconds
+    const pollInterval = 3500; // 3.5 seconds
 
     const syncChat = async () => {
       try {
-        const url = `/api/youtube/chat${lastFetchedId ? `?lastId=${lastFetchedId}` : ''}`;
+        const token = getAccessToken();
+        const queryParams = new URLSearchParams();
+        if (lastFetchedId) queryParams.set('lastId', lastFetchedId);
+        if (token) queryParams.set('token', token);
+
+        const url = `/api/youtube/chat${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
         const res = await fetch(url);
         const newMsgs = await res.json();
 
@@ -1153,18 +1107,9 @@ export const App: React.FC = () => {
   }, [isLive, isListening, handleIncomingMessage]);
 
   const handleSendBotMessage = (content: string) => {
-    const botMsg: ChatMessage = {
-      id: `msg-manual-bot-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-      sender: botIdentity.botName,
-      senderRole: 'bot',
-      isBot: true,
-      content,
-      timestamp: new Date().toLocaleTimeString(),
-      matchedRule: 'Manual Broadcaster Dispatch'
-    };
-    setMessages((prev) => [...prev, botMsg]);
-    addLog('bot', 'SYSTEM', `Manual bot broadcast sent: "${content}"`);
+    dispatchBotReply(content, 'Manual Broadcaster Dispatch');
   };
+
 
   // Simulated traffic generator (Lightweight interval)
   useEffect(() => {

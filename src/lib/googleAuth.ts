@@ -2,11 +2,11 @@
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import { initFirebase } from './firebase';
 
-
 const provider = new GoogleAuthProvider();
-// The scopes confirmed by user
+// Request full YouTube permissions to read and post chat messages
 const SCOPES = [
-  'https://www.googleapis.com/auth/youtube.readonly'
+  'https://www.googleapis.com/auth/youtube.readonly',
+  'https://www.googleapis.com/auth/youtube.force-ssl'
 ];
 SCOPES.forEach(scope => provider.addScope(scope));
 
@@ -14,7 +14,7 @@ let isSigningIn = false;
 let cachedAccessToken: string | null = null;
 
 export const initAuth = (
-  onAuthSuccess?: (user: User, token: string) => void,
+  onAuthSuccess?: (user: User, token: string | null) => void,
   onAuthFailure?: () => void
 ) => {
   let unsubscribe: (() => void) | null = null;
@@ -28,11 +28,7 @@ export const initAuth = (
     }
     unsubscribe = onAuthStateChanged(authInstance, async (user: User | null) => {
       if (user) {
-        if (cachedAccessToken) {
-          if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
-        } else if (!isSigningIn) {
-          if (onAuthFailure) onAuthFailure();
-        }
+        if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
       } else {
         cachedAccessToken = null;
         localStorage.removeItem('droidos_token');
@@ -57,13 +53,12 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     isSigningIn = true;
     const result = await signInWithPopup(authInstance, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error('Failed to get access token from Firebase Auth');
+    const token = credential?.accessToken || '';
+    if (token) {
+      cachedAccessToken = token;
+      localStorage.setItem('droidos_token', cachedAccessToken);
     }
-
-    cachedAccessToken = credential.accessToken;
-    localStorage.setItem('droidos_token', cachedAccessToken);
-    return { user: result.user, accessToken: cachedAccessToken };
+    return { user: result.user, accessToken: token };
   } catch (error: any) {
     console.error('Sign in error:', error);
     throw error;
@@ -72,7 +67,7 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
   }
 };
 
-export const getAccessToken = (): string | null => cachedAccessToken;
+export const getAccessToken = (): string | null => cachedAccessToken || localStorage.getItem('droidos_token');
 
 export const logout = async () => {
   const firebase = await initFirebase();
@@ -83,3 +78,4 @@ export const logout = async () => {
   cachedAccessToken = null;
   localStorage.removeItem('droidos_token');
 };
+
