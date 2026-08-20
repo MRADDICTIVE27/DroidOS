@@ -115,6 +115,7 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
         activeLiveChatId: data.activeLiveChatId,
         videoId: data.videoId,
         streamTitle: data.streamTitle || prev.streamTitle,
+        channelName: data.channelName || prev.channelName,
         thumbnailUrl: data.thumbnailUrl || prev.thumbnailUrl,
         viewerCount: data.viewerCount !== undefined ? data.viewerCount : prev.viewerCount,
         streamUrl: data.videoId ? `https://youtube.com/watch?v=${data.videoId}` : prev.streamUrl,

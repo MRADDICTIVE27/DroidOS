@@ -459,12 +459,14 @@ async function startServer() {
           const html = await pageRes.text();
 
           // Extract Title
-          let title = `YouTube Stream (${videoId})`;
+          let title = `YouTube Live Stream (${videoId})`;
           const titleMatch = html.match(/<meta\s+name="title"\s+content="([^"]+)"/i) ||
                              html.match(/<meta\s+property="og:title"\s+content="([^"]+)"/i) ||
-                             html.match(/<title>([^<]+)<\/title>/i);
-          if (titleMatch && titleMatch[1]) {
-            title = titleMatch[1].replace(/\s*-\s*YouTube$/i, '').trim();
+                             html.match(/"title":{"runs":\[{"text":"([^"]+)"}/) ||
+                             html.match(/"title":"([^"]+)"/);
+          if (titleMatch && titleMatch[1] && titleMatch[1].trim()) {
+            const clean = titleMatch[1].replace(/\s*-\s*YouTube$/i, '').trim();
+            if (clean) title = clean;
           }
 
           // Extract Channel Name
@@ -472,8 +474,8 @@ async function startServer() {
           const authorMatch = html.match(/<link\s+itemprop="name"\s+content="([^"]+)"/i) ||
                               html.match(/"ownerChannelName":"([^"]+)"/i) ||
                               html.match(/"author":"([^"]+)"/i);
-          if (authorMatch && authorMatch[1]) {
-            channelName = authorMatch[1];
+          if (authorMatch && authorMatch[1] && authorMatch[1].trim()) {
+            channelName = authorMatch[1].trim();
           }
 
           // Extract Innertube API Key & Continuation
