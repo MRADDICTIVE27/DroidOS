@@ -147,6 +147,11 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
     
+    match /alerts/{alertId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
     match /admins/{adminId} {
       allow read: if isSignedIn();
       allow write: if false; // Only manageable via console or higher admin

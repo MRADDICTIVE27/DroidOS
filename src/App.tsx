@@ -96,7 +96,6 @@ export const App: React.FC = () => {
     'games',
     'soundeffects',
     'obs',
-    'obs-overlay',
     'identity',
     'authenticator',
     'memory',
