@@ -12,9 +12,12 @@ export const Overlay: React.FC = () => {
     
     const setup = async () => {
       try {
+        console.log("Overlay: Initializing Firebase...");
         const firebase = await initFirebase();
+        console.log("Overlay: Firebase initialized result:", !!firebase);
+        
         if (!firebase || !firebase.db) {
-            setStatus('Error: Firebase initialization failed');
+            setStatus('Error: Firebase init failed');
             return;
         }
         setStatus('Connected');
