@@ -63,13 +63,14 @@ service cloud.firestore {
     }
     
     match /viewers/{viewerId} {
-      allow get: if isSignedIn();
+      // Hardened: PII Isolation - only owner or admin can read sensitive viewer profiles
+      allow get: if isSignedIn() && (isOwner(viewerId) || isAdmin());
       allow list: if isAdmin();
       allow create: if isSignedIn() && isValidViewer(incoming()) && incoming().id == viewerId;
       allow update: if isSignedIn() && (
         (isOwner(viewerId) && isValidViewer(incoming()) && 
          incoming().diff(existing()).affectedKeys().hasOnly(['points', 'totalPointsEarned', 'watchTimeMinutes', 'lastSeen', 'messageCount', 'visitStreak', 'customFacts', 'notes', 'avatarColor', 'avatarUrl', 'channelUrl', 'customShoutoutMessage', 'autoShoutout']) &&
-         incoming().role == existing().role) || // Owner cannot change their own role
+         incoming().role == existing().role) || 
         isAdmin()
       );
       allow delete: if isAdmin();
@@ -127,7 +128,8 @@ service cloud.firestore {
     }
 
     match /redemptions/{redId} {
-      allow read, write: if isSignedIn(); // Basic, needs hardening based on role
+      allow read: if isSignedIn() && (isOwner(resource.data.userId) || isAdmin());
+      allow write: if isSignedIn() && (isOwner(request.resource.data.userId) || isAdmin());
     }
 
     match /messages/{msgId} {
