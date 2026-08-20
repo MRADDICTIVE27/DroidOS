@@ -399,8 +399,9 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    // Express v5 uses *all
-    app.get("*all", (_req, res) => {
+    // Express v5 wildcard route
+    app.get("*", (_req, res) => {
+      console.log("Wildcard route hit for:", _req.url);
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
