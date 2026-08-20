@@ -64,6 +64,14 @@ async function startServer() {
   let innertubeApiKey: string = "AIzaSyAO_FJ2SlqU8Q4usACZaau0dsnYwcWsj2g"; // Default public YouTube web client key
   let innertubeContinuation: string | null = null;
 
+  const getValidApiKey = (): string | null => {
+    const raw = process.env.YOUTUBE_API_KEY;
+    if (raw && raw.startsWith("AIza") && raw.length >= 25) {
+      return raw;
+    }
+    return null;
+  };
+
   // 1. YouTube Live Chat poller subroutine
   async function pollYouTubeChat() {
     if (chatPollTimeout) {
@@ -71,7 +79,7 @@ async function startServer() {
       chatPollTimeout = null;
     }
 
-    const apiKey = process.env.YOUTUBE_API_KEY;
+    const apiKey = getValidApiKey();
     const chatId = streamMetadata.activeLiveChatId;
     const token = cachedOAuthToken;
     const videoId = streamMetadata.videoId;
@@ -273,8 +281,8 @@ async function startServer() {
     }
 
     // If chat is public scraper, no real liveChatId, or no OAuth token
-    if (!activeChatId || activeChatId.startsWith('public-') || !token) {
-      // Local broadcast fallback when not connected to a live stream ID or when unauthenticated
+    if (!token) {
+      // Local broadcast fallback when not authenticated
       const localMsg = {
         id: `msg-server-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         sender: req.body.sender || "DroidBot",
@@ -285,12 +293,31 @@ async function startServer() {
       };
       chatMessagesQueue = [...chatMessagesQueue, localMsg].slice(-200);
       return res.json({
-        success: true,
+        success: false,
+        requiresAuth: true,
         localOnly: true,
         message: localMsg,
-        notice: token
-          ? "Message recorded in stream chat feed."
-          : "Message broadcast in stream feed. (Log in with Google in Authenticator to write directly to YouTube Chat API)"
+        error: "Google account not authenticated with YouTube. Sign in with Google to post directly into live YouTube chat.",
+        notice: "Message displayed in stream overlay only. (Log in with Google to send to YouTube live chat)"
+      });
+    }
+
+    if (!activeChatId || activeChatId.startsWith('public-')) {
+      const localMsg = {
+        id: `msg-server-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        sender: req.body.sender || "DroidBot",
+        content: cleanMsg,
+        senderRole: req.body.senderRole || "bot",
+        timestamp: new Date().toLocaleTimeString(),
+        isBot: true
+      };
+      chatMessagesQueue = [...chatMessagesQueue, localMsg].slice(-200);
+      return res.json({
+        success: false,
+        localOnly: true,
+        message: localMsg,
+        error: "Active YouTube live chat ID could not be found for this stream. Ensure your stream is currently live on YouTube and live chat is enabled.",
+        notice: "Message displayed in stream overlay only."
       });
     }
 
@@ -425,7 +452,7 @@ async function startServer() {
   app.post("/api/youtube/resolve-stream", async (req, res) => {
     const { input, token } = req.body;
     const effectiveToken = token || cachedOAuthToken;
-    const apiKey = process.env.YOUTUBE_API_KEY;
+    const apiKey = getValidApiKey();
 
     try {
       // 1. If user asks to auto-detect from active broadcasts

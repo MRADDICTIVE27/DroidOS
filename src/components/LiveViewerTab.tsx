@@ -22,10 +22,16 @@ import {
   Globe,
   ExternalLink,
   MessageSquare,
-  X
+  X,
+  LogIn,
+  LogOut,
+  ShieldCheck,
+  UserCheck,
+  Lock
 } from 'lucide-react';
 import { ChatMessage, BotIdentity, CustomRole, ViewerProfile, StreamLiveMetadata } from '../types';
-import { getAccessToken } from '../lib/googleAuth';
+import { getAccessToken, initAuth, googleSignIn, logout } from '../lib/googleAuth';
+import { User } from 'firebase/auth';
 
 interface LiveViewerTabProps {
   messages: ChatMessage[];
@@ -77,6 +83,52 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
   const [connectError, setConnectError] = useState<string | null>(null);
   const [isSendingTestLiveMsg, setIsSendingTestLiveMsg] = useState(false);
   const [testLiveMsgNotice, setTestLiveMsgNotice] = useState<string | null>(null);
+
+  // Google OAuth State
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(getAccessToken());
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = initAuth(
+      (u, t) => {
+        setAuthUser(u);
+        setAuthToken(t);
+      },
+      () => {
+        setAuthUser(null);
+        setAuthToken(null);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
+  const handleGoogleLogin = async () => {
+    setIsLoggingIn(true);
+    setConnectError(null);
+    setConnectNotice(null);
+    try {
+      const result = await googleSignIn();
+      if (result) {
+        setAuthUser(result.user);
+        setAuthToken(result.accessToken);
+        setConnectNotice(`✓ Connected as ${result.user.displayName || result.user.email} with YouTube live chat permissions!`);
+        setTimeout(() => setConnectNotice(null), 5000);
+      }
+    } catch (err: any) {
+      setConnectError(`Google Login failed: ${err.message}`);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleGoogleLogout = async () => {
+    await logout();
+    setAuthUser(null);
+    setAuthToken(null);
+    setConnectNotice('Logged out of Google account.');
+    setTimeout(() => setConnectNotice(null), 3000);
+  };
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -232,6 +284,7 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
         body: JSON.stringify({
           message: testContent,
           liveChatId: streamMetadata.activeLiveChatId,
+          videoId: streamMetadata.videoId,
           accessToken: token,
           sender: botIdentity.botName,
           senderRole: 'bot'
@@ -245,13 +298,18 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
         data = { success: true };
       }
 
-      const noticeText = data?.notice || data?.warning || 'Bot broadcast dispatched to live chat feed!';
-      setTestLiveMsgNotice(noticeText);
-      setTimeout(() => setTestLiveMsgNotice(null), 5000);
-    } catch {
-      // Fallback display
-      setTestLiveMsgNotice('Bot test message posted in stream chat feed.');
-      setTimeout(() => setTestLiveMsgNotice(null), 5000);
+      if (data?.success && !data?.localOnly) {
+        setTestLiveMsgNotice(`✓ Message sent directly to YouTube Live Chat! (Message ID: ${data.item?.id || 'OK'})`);
+      } else if (data?.requiresAuth) {
+        setConnectError('Google login required: Click "Sign In with Google" below to enable posting directly to YouTube Live Chat.');
+      } else if (data?.warning || data?.error) {
+        setConnectError(`YouTube Chat notice: ${data.warning || data.error}`);
+      } else {
+        setTestLiveMsgNotice(data?.notice || 'Bot message recorded in stream broadcast overlay.');
+      }
+      setTimeout(() => setTestLiveMsgNotice(null), 6000);
+    } catch (err: any) {
+      setConnectError(`Send error: ${err.message || 'Failed to dispatch to YouTube API'}`);
     } finally {
       setIsSendingTestLiveMsg(false);
     }
@@ -547,6 +605,65 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
             {isConnectingStream ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Link className="w-3.5 h-3.5" />}
             <span>{isConnectingStream ? 'Connecting...' : 'Connect Live Stream'}</span>
           </button>
+        </div>
+
+        {/* YouTube Account & Outbound Auth Banner */}
+        <div className={`p-3 rounded-xl border flex flex-wrap items-center justify-between gap-3 text-xs ${
+          authToken || authUser
+            ? 'bg-blue-950/40 border-blue-800/60 text-blue-200'
+            : 'bg-amber-950/40 border-amber-800/60 text-amber-200'
+        }`}>
+          <div className="flex items-center gap-2.5">
+            {authToken || authUser ? (
+              <div className="w-7 h-7 rounded-lg bg-blue-600/30 text-blue-300 flex items-center justify-center shrink-0 border border-blue-500/40">
+                <ShieldCheck className="w-4 h-4 text-blue-400" />
+              </div>
+            ) : (
+              <div className="w-7 h-7 rounded-lg bg-amber-600/30 text-amber-300 flex items-center justify-center shrink-0 border border-amber-500/40">
+                <Lock className="w-4 h-4 text-amber-400" />
+              </div>
+            )}
+            <div>
+              <div className="font-bold flex items-center gap-2">
+                <span>
+                  {authToken || authUser
+                    ? `YouTube Broadcast Account: ${authUser?.displayName || authUser?.email || 'Authenticated'}`
+                    : 'YouTube Live Chat Authorization: Not Signed In'}
+                </span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold ${
+                  authToken || authUser ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-amber-950 text-amber-300 border border-amber-800'
+                }`}>
+                  {authToken || authUser ? '✓ OUTBOUND READY' : 'READ-ONLY MODE'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                {authToken || authUser
+                  ? 'Bot replies and custom broadcasts are authorized to send directly to your live YouTube chat room.'
+                  : 'Sign in with your YouTube channel account to give DroidBot permission to broadcast replies directly to YouTube chat.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {authToken || authUser ? (
+              <button
+                onClick={handleGoogleLogout}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all border border-slate-700"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Disconnect Account</span>
+              </button>
+            ) : (
+              <button
+                onClick={handleGoogleLogin}
+                disabled={isLoggingIn}
+                className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-blue-600/30 cursor-pointer transition-all disabled:opacity-50"
+              >
+                {isLoggingIn ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <LogIn className="w-3.5 h-3.5" />}
+                <span>{isLoggingIn ? 'Signing in...' : 'Sign in with Google (YouTube Access)'}</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Feedback / Notices */}
