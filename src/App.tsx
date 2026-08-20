@@ -499,7 +499,7 @@ export const App: React.FC = () => {
 
   // Handle Manual/Automated Store Redeem
   const handleRedeemItem = useCallback(
-    (redeem: RedeemItem, username: string) => {
+    async (redeem: RedeemItem, username: string) => {
       setProfiles((prev) => {
         return prev.map((p) => {
           if (p.username.toLowerCase() === username.toLowerCase()) {
@@ -553,6 +553,25 @@ export const App: React.FC = () => {
       setRedeems((prev) =>
         prev.map((r) => (r.id === redeem.id ? { ...r, timesRedeemed: r.timesRedeemed + 1 } : r))
       );
+
+      // Trigger OBS Overlay
+      if (redeem.gifUrl) {
+        try {
+          const { initFirebase } = await import('./lib/firebase');
+          const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
+          const firebase = await initFirebase();
+          if (firebase?.db) {
+            await addDoc(collection(firebase.db, 'alerts'), {
+              gifUrl: redeem.gifUrl,
+              audioUrl: redeem.linkedSoundId ? soundEffects.find(s => s.id === redeem.linkedSoundId)?.customAudioUrl : undefined,
+              timestamp: serverTimestamp(),
+              durationMs: 5000
+            });
+          }
+        } catch (e) {
+          console.error("Failed to trigger OBS overlay alert", e);
+        }
+      }
 
       const botMsg: ChatMessage = {
         id: `msg-redeem-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
