@@ -109,8 +109,7 @@ export const App: React.FC = () => {
     'analytics',
     'telemetry',
     'updates',
-    'settings',
-    'obs-overlay'
+    'settings'
   ]);
 
   // Core Data States
