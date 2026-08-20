@@ -98,7 +98,13 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
         body: JSON.stringify({ input: target, token })
       });
 
-      const data = await res.json();
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error(`Server returned status ${res.status}: Connection error`);
+      }
+
       if (!res.ok || data.error) {
         throw new Error(data.error || 'Failed to connect to YouTube live stream');
       }
@@ -146,7 +152,13 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
         body: JSON.stringify({ input: '__MY_ACTIVE_BROADCAST__', token })
       });
 
-      const data = await res.json();
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error(`Server returned status ${res.status}: Connection error`);
+      }
+
       if (!res.ok || data.error) {
         throw new Error(data.error || 'No active live broadcast found on your YouTube channel');
       }

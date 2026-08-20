@@ -1278,15 +1278,14 @@ export const App: React.FC = () => {
   };
 
   // Check for Overlay Mode (used for OBS browser sources)
-  const isOverlayMode = new URLSearchParams(window.location.search).get('mode') === 'overlay';
+  const isOverlayMode =
+    typeof window !== 'undefined' &&
+    (window.location.pathname.toLowerCase().startsWith('/overlay') ||
+      window.location.hash.toLowerCase().includes('overlay') ||
+      new URLSearchParams(window.location.search).get('mode') === 'overlay');
 
   if (isOverlayMode) {
-    return (
-      <div className={`min-h-screen flex items-center justify-center bg-transparent overflow-hidden`}>
-        <ShoutoutOverlayWidget activeShoutout={activeShoutout} />
-        {/* Additional minimal overlay elements can go here */}
-      </div>
-    );
+    return <Overlay />;
   }
 
   return (
