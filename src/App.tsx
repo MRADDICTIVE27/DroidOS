@@ -23,6 +23,7 @@ import { UpdatesTab } from './components/UpdatesTab';
 import { SettingsTab } from './components/SettingsTab';
 import { ShoutoutsTab } from './components/ShoutoutsTab';
 import { ShoutoutOverlayWidget } from './components/ShoutoutOverlayWidget';
+import { Overlay } from './components/Overlay';
 import { initAuth } from './lib/googleAuth';
 import { saveStateToCloud, loadStateFromCloud } from './lib/cloudSync';
 import { User } from 'firebase/auth';
@@ -69,6 +70,10 @@ import { processIncomingMessage, queryAiEngine, checkAchievementProgress } from 
 import { playSynthesizedSound, playCustomAudioUrl } from './services/soundService';
 
 export const App: React.FC = () => {
+  if (window.location.pathname === '/overlay') {
+    return <Overlay />;
+  }
+
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [theme, setTheme] = useState<AppTheme>('dark');
   const [isFirebaseConfigured, setIsFirebaseConfigured] = useState<boolean>(false);
