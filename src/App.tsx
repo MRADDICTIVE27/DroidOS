@@ -14,6 +14,7 @@ import { PointsTab } from './components/PointsTab';
 import { SoundEffectsTab } from './components/SoundEffectsTab';
 import { AchievementsTab } from './components/AchievementsTab';
 import { ObsControlTab } from './components/ObsControlTab';
+import { ObsOverlayTab } from './components/ObsOverlayTab';
 import { RedeemsTab } from './components/RedeemsTab';
 import { GamesTab } from './components/GamesTab';
 import { GeneralCommandsTab } from './components/GeneralCommandsTab';
@@ -95,6 +96,7 @@ export const App: React.FC = () => {
     'games',
     'soundeffects',
     'obs',
+    'obs-overlay',
     'identity',
     'authenticator',
     'memory',
@@ -107,7 +109,8 @@ export const App: React.FC = () => {
     'analytics',
     'telemetry',
     'updates',
-    'settings'
+    'settings',
+    'obs-overlay'
   ]);
 
   // Core Data States
@@ -1393,6 +1396,10 @@ export const App: React.FC = () => {
                 onSaveNotice={() => showToast('OBS Studio configurations saved.')}
                 onSendLog={(lvl, mod, msg) => addLog(lvl, mod, msg)}
               />
+            )}
+
+            {activeTab === 'obs-overlay' && (
+              <ObsOverlayTab />
             )}
 
             {activeTab === 'redeems' && (

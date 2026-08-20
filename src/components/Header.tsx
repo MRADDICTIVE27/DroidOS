@@ -45,6 +45,7 @@ export const ALL_WORKSPACE_TABS = [
   { id: 'achievements', label: 'Achievements', icon: Trophy },
   { id: 'games', label: 'Chat Games', icon: Radio },
   { id: 'obs', label: 'OBS Control', icon: Tv },
+  { id: 'obs-overlay', label: 'OBS Overlay', icon: Tv },
   { id: 'redeems', label: 'Redeems', icon: Gift },
   { id: 'general', label: 'General Commands', icon: MessageSquareCode },
   { id: 'custom', label: 'Custom Commands', icon: Terminal },

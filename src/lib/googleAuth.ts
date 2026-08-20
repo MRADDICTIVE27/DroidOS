@@ -18,6 +18,7 @@ export const initAuth = (
   onAuthFailure?: () => void
 ) => {
   let unsubscribe: (() => void) | null = null;
+  cachedAccessToken = localStorage.getItem('droidos_token');
 
   initFirebase().then(firebase => {
     const authInstance = firebase?.auth;
@@ -34,6 +35,7 @@ export const initAuth = (
         }
       } else {
         cachedAccessToken = null;
+        localStorage.removeItem('droidos_token');
         if (onAuthFailure) onAuthFailure();
       }
     });
@@ -60,6 +62,7 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     }
 
     cachedAccessToken = credential.accessToken;
+    localStorage.setItem('droidos_token', cachedAccessToken);
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error('Sign in error:', error);
@@ -78,4 +81,5 @@ export const logout = async () => {
     await authInstance.signOut();
   }
   cachedAccessToken = null;
+  localStorage.removeItem('droidos_token');
 };

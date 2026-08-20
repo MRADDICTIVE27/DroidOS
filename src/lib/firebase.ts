@@ -1,5 +1,5 @@
 import { initializeApp, FirebaseApp } from 'firebase/app';
-import { getAuth, Auth } from 'firebase/auth';
+import { getAuth, Auth, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
 
 let app: FirebaseApp | null = null;
@@ -43,6 +43,9 @@ export const initFirebase = async (): Promise<{ auth: Auth; db: Firestore } | nu
 
     app = initializeApp(config);
     auth = getAuth(app);
+    
+    // Set persistence to LOCAL
+    await setPersistence(auth, browserLocalPersistence);
     
     // Explicitly connect to the named database if provided, otherwise default
     if (config.firestoreDatabaseId) {
