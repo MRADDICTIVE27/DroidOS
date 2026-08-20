@@ -126,33 +126,61 @@ export const AuthenticatorTab: React.FC<AuthenticatorTabProps> = ({
       const channel = channelData.items[0];
       const channelId = channel.id;
       const channelName = channel.snippet.title;
-      const thumbnailUrl = channel.snippet.thumbnails?.default?.url || '';
+      const thumbnailUrl = channel.snippet.thumbnails?.high?.url || channel.snippet.thumbnails?.default?.url || '';
       const subscribers = parseInt(channel.statistics.subscriberCount || '0', 10);
       
-      // 2. Fetch live broadcast if any
-      const searchRes = await fetch(`https://youtube.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&eventType=live&type=video`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const searchData = await searchRes.json();
-      
+      // 2. Try fetching active live broadcast directly via OAuth
       let isLive = false;
       let liveViewerCount = 0;
-      let streamTitle = "Offline";
+      let streamTitle = `${channelName}'s Live Stream`;
       let streamUrl = "";
-      
-      if (searchData.items && searchData.items.length > 0) {
-        isLive = true;
-        const videoId = searchData.items[0].id.videoId;
-        streamTitle = searchData.items[0].snippet.title;
-        streamUrl = `https://youtube.com/watch?v=${videoId}`;
+      let activeLiveChatId: string | null = null;
+      let videoId: string | null = null;
+
+      try {
+        const broadcastRes = await fetch('https://youtube.googleapis.com/youtube/v3/liveBroadcasts?broadcastStatus=active&broadcastType=all&part=id,snippet,status,contentDetails', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const broadcastData = await broadcastRes.json();
+        if (broadcastData.items && broadcastData.items.length > 0) {
+          const item = broadcastData.items[0];
+          isLive = true;
+          videoId = item.id;
+          streamTitle = item.snippet?.title || streamTitle;
+          streamUrl = `https://youtube.com/watch?v=${videoId}`;
+          activeLiveChatId = item.snippet?.liveChatId || null;
+        }
+      } catch (err) {
+        console.warn('liveBroadcasts active check warning:', err);
+      }
+
+      // 3. If no active broadcast found via liveBroadcasts, fallback to search/video query
+      if (!isLive) {
+        const searchRes = await fetch(`https://youtube.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&eventType=live&type=video`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const searchData = await searchRes.json();
         
-        // Fetch viewer count
-        const videoRes = await fetch(`https://youtube.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${videoId}`, {
+        if (searchData.items && searchData.items.length > 0) {
+          isLive = true;
+          videoId = searchData.items[0].id.videoId;
+          streamTitle = searchData.items[0].snippet.title;
+          streamUrl = `https://youtube.com/watch?v=${videoId}`;
+        }
+      }
+
+      // 4. If we have a videoId, fetch liveStreamingDetails for activeLiveChatId and concurrentViewers
+      if (videoId) {
+        const videoRes = await fetch(`https://youtube.googleapis.com/youtube/v3/videos?part=snippet,liveStreamingDetails&id=${videoId}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         const videoData = await videoRes.json();
         if (videoData.items && videoData.items.length > 0) {
-          liveViewerCount = parseInt(videoData.items[0].liveStreamingDetails?.concurrentViewers || '0', 10);
+          const details = videoData.items[0].liveStreamingDetails;
+          if (details?.activeLiveChatId) {
+            activeLiveChatId = details.activeLiveChatId;
+          }
+          liveViewerCount = parseInt(details?.concurrentViewers || '0', 10);
         }
       }
       
@@ -161,15 +189,32 @@ export const AuthenticatorTab: React.FC<AuthenticatorTabProps> = ({
       
       // Wipe mock placeholder profiles upon connecting a real account
       setProfiles((prev) => prev.filter(p => !p.id.startsWith('prof-')));
+
+      // Notify backend server to sync live chat polling
+      fetch('/api/youtube/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          activeLiveChatId,
+          videoId,
+          streamTitle,
+          thumbnailUrl,
+          viewerCount: liveViewerCount,
+          isLive,
+          accessToken: token
+        })
+      }).catch((e) => console.warn('Failed to notify backend of YouTube connect:', e));
       
       setStreamMetadata((prev) => ({
         ...prev,
         isLive,
+        activeLiveChatId,
+        videoId,
         viewerCount: liveViewerCount,
         subscriberCount: subscribers,
         streamTitle,
         streamUrl,
-        thumbnailUrl,
+        thumbnailUrl: thumbnailUrl || prev.thumbnailUrl,
         streamerAuth: {
           ...prev.streamerAuth,
           authenticated: true,

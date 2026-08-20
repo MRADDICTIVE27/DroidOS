@@ -25,6 +25,7 @@ import { SettingsTab } from './components/SettingsTab';
 import { ShoutoutsTab } from './components/ShoutoutsTab';
 import { ShoutoutOverlayWidget } from './components/ShoutoutOverlayWidget';
 import { Overlay } from './components/Overlay';
+import { dispatchOverlayAlert } from './services/alertDispatcher';
 import { initAuth, getAccessToken } from './lib/googleAuth';
 import { saveStateToCloud, loadStateFromCloud } from './lib/cloudSync';
 import { User } from 'firebase/auth';
@@ -571,28 +572,38 @@ export const App: React.FC = () => {
         prev.map((r) => (r.id === redeem.id ? { ...r, timesRedeemed: r.timesRedeemed + 1 } : r))
       );
 
-      // Trigger OBS Overlay
+      // Trigger Multi-Channel OBS Overlay Alert (BroadcastChannel + LocalStorage + Server Queue)
+      const linkedSound = redeem.linkedSoundId ? soundEffects.find(s => s.id === redeem.linkedSoundId) : undefined;
+      dispatchOverlayAlert({
+        id: `redeem-${Date.now()}-${redeem.id}`,
+        type: 'redeem',
+        title: `🎉 @${username} redeemed "${redeem.title}"!`,
+        subtitle: 'CHANNEL REDEMPTION',
+        username,
+        customMessage: redeem.description,
+        gifUrl: redeem.gifUrl,
+        audioUrl: linkedSound?.customAudioUrl,
+        synthPreset: linkedSound?.synthPreset || 'coin',
+        pointsCost: redeem.cost,
+        durationMs: 5500
+      });
+
+      // Also persist to Firebase if connected
       if (redeem.gifUrl) {
         try {
           const { initFirebase } = await import('./lib/firebase');
           const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
           const firebase = await initFirebase();
           if (firebase?.db) {
-            console.log("Triggering OBS alert write to Firestore:", {
-              gifUrl: redeem.gifUrl,
-            });
             await addDoc(collection(firebase.db, 'alerts'), {
               gifUrl: redeem.gifUrl,
-              audioUrl: redeem.linkedSoundId ? soundEffects.find(s => s.id === redeem.linkedSoundId)?.customAudioUrl : undefined,
+              audioUrl: linkedSound?.customAudioUrl,
               timestamp: serverTimestamp(),
-              durationMs: 5000
+              durationMs: 5500
             });
-            console.log("OBS alert written successfully.");
-          } else {
-            console.warn("Could not trigger OBS alert: Firebase not initialized.");
           }
         } catch (e) {
-          console.error("Failed to trigger OBS overlay alert", e);
+          // Non-blocking
         }
       }
 
@@ -679,6 +690,18 @@ export const App: React.FC = () => {
           theme: shoutoutConfig.overlayTheme,
           position: shoutoutConfig.overlayPosition,
           heading: shoutoutConfig.overlayHeading,
+          durationMs: shoutoutConfig.overlayDurationSeconds * 1000
+        });
+
+        dispatchOverlayAlert({
+          id: `so-${Date.now()}`,
+          type: 'shoutout',
+          title: `🌟 SHOUTOUT: ${displayName}`,
+          subtitle: `${role.toUpperCase()} • @${username}`,
+          username,
+          customMessage: message,
+          avatarUrl,
+          synthPreset: shoutoutConfig.soundEffectPreset || 'fanfare',
           durationMs: shoutoutConfig.overlayDurationSeconds * 1000
         });
       }
@@ -961,6 +984,16 @@ export const App: React.FC = () => {
                 dispatchBotReply(`🏆 BOOM! @${safeSender} landed the killing blow on [${gameState.bossName}]! The community is safe once more! Rewards granted.`, 'Game [Boss]');
                 const reward = gameState.config.bossKillReward;
                 setProfiles(prev => prev.map(p => p.username.toLowerCase() === safeSender.toLowerCase() ? { ...p, points: p.points + reward } : p));
+                dispatchOverlayAlert({
+                  id: `boss-kill-${Date.now()}`,
+                  type: 'game',
+                  title: '🏆 BOSS DEFEATED!',
+                  subtitle: `${gameState.bossName} slain by @${safeSender}`,
+                  username: safeSender,
+                  customMessage: `Earned +${reward} ${pointsConfig.currencyName}!`,
+                  synthPreset: 'victory',
+                  durationMs: 6000
+                });
               } else {
                 if (Math.random() > 0.8) {
                   dispatchBotReply(`⚔️ @${safeSender} dealt ${dmg} DMG to ${gameState.bossName}! (${newHP} HP left)`, 'Game [Boss]');
@@ -1052,6 +1085,17 @@ export const App: React.FC = () => {
                 } else if (foundSfx.customAudioUrl) {
                   playCustomAudioUrl(foundSfx.customAudioUrl, foundSfx.volume);
                 }
+                dispatchOverlayAlert({
+                  id: `sfx-${Date.now()}`,
+                  type: 'sound',
+                  title: `🔊 SFX: ${foundSfx.name}`,
+                  subtitle: `TRIGGERED BY @${safeSender}`,
+                  username: safeSender,
+                  synthPreset: foundSfx.synthPreset,
+                  audioUrl: foundSfx.customAudioUrl,
+                  volume: foundSfx.volume,
+                  durationMs: 4000
+                });
               }
             }
           }

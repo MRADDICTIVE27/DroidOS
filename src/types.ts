@@ -106,6 +106,8 @@ export interface StreamLiveMetadata {
   viewerCount: number;
   subscriberCount: number;
   category: string;
+  activeLiveChatId?: string | null;
+  videoId?: string | null;
   streamerAuth: YoutubeAuthAccount;
   botAuth: YoutubeAuthAccount;
   youtubeApiV3: {

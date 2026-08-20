@@ -20,7 +20,7 @@ function getGeminiClient(): GoogleGenAI | null {
 }
 
 // In-memory stream state (lightweight, minimum CPU/RAM)
-let streamMetadata = {
+let streamMetadata: any = {
   isLive: true,
   streamTitle: "🔴 Live Gaming & Community Chat | Interactive Bot Online",
   channelName: "LiveStreamer",
@@ -29,6 +29,8 @@ let streamMetadata = {
   viewerCount: 142,
   thumbnailUrl: "https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800&auto=format&fit=crop&q=60",
   streamUptimeSeconds: 3600,
+  activeLiveChatId: null,
+  videoId: null,
   streamerAuth: {
     authenticated: true,
     accountName: "Broadcaster Account",
@@ -40,6 +42,8 @@ let streamMetadata = {
     channelId: "UC_BOT_APPLET"
   }
 };
+
+let overlayAlertsQueue: any[] = [];
 
 async function startServer() {
   const app = express();
@@ -208,6 +212,149 @@ async function startServer() {
     }
   });
 
+
+  // --- OBS Overlay Alert Real-time Sync API ---
+  app.get("/api/overlay/alerts", (req, res) => {
+    const since = parseInt(req.query.since as string) || 0;
+    const filtered = overlayAlertsQueue.filter((a) => (a.timestamp || 0) > since);
+    res.json({ alerts: filtered });
+  });
+
+  app.post("/api/overlay/alerts", (req, res) => {
+    const alert = req.body;
+    if (!alert || !alert.title) {
+      return res.status(400).json({ error: "Invalid alert payload" });
+    }
+    const alertItem = {
+      ...alert,
+      id: alert.id || `alert-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      timestamp: alert.timestamp || Date.now()
+    };
+    overlayAlertsQueue = [...overlayAlertsQueue, alertItem].slice(-50);
+    res.json({ success: true, alert: alertItem });
+  });
+
+  // --- YouTube Stream Connect & Resolve Endpoints ---
+  app.post("/api/youtube/connect", (req, res) => {
+    const { activeLiveChatId, videoId, streamTitle, thumbnailUrl, viewerCount, isLive, accessToken } = req.body;
+    
+    if (activeLiveChatId !== undefined) streamMetadata.activeLiveChatId = activeLiveChatId;
+    if (videoId !== undefined) streamMetadata.videoId = videoId;
+    if (streamTitle !== undefined) streamMetadata.streamTitle = streamTitle;
+    if (thumbnailUrl !== undefined) streamMetadata.thumbnailUrl = thumbnailUrl;
+    if (viewerCount !== undefined) streamMetadata.viewerCount = viewerCount;
+    if (isLive !== undefined) streamMetadata.isLive = isLive;
+    if (accessToken) cachedOAuthToken = accessToken;
+
+    // Reset pagination token and trigger poll immediately
+    nextChatPageToken = null;
+    if (chatPollTimeout) clearTimeout(chatPollTimeout);
+    chatPollTimeout = null;
+
+    if (streamMetadata.isLive && streamMetadata.activeLiveChatId) {
+      pollYouTubeChat();
+    }
+
+    res.json({ success: true, streamMetadata });
+  });
+
+  app.post("/api/youtube/resolve-stream", async (req, res) => {
+    const { input, token } = req.body;
+    const effectiveToken = token || cachedOAuthToken;
+    const apiKey = process.env.YOUTUBE_API_KEY;
+
+    try {
+      // 1. If user asks to auto-detect from active broadcasts
+      if (input === '__MY_ACTIVE_BROADCAST__' && effectiveToken) {
+        const broadcastRes = await fetch(
+          'https://youtube.googleapis.com/youtube/v3/liveBroadcasts?broadcastStatus=active&broadcastType=all&part=id,snippet,status,contentDetails',
+          { headers: { Authorization: `Bearer ${effectiveToken}` } }
+        );
+        const broadcastData = await broadcastRes.json();
+        if (broadcastData.items && broadcastData.items.length > 0) {
+          const item = broadcastData.items[0];
+          const liveChatId = item.snippet?.liveChatId;
+          const videoId = item.id;
+          const title = item.snippet?.title || 'Live Stream';
+          const thumb = item.snippet?.thumbnails?.high?.url || item.snippet?.thumbnails?.default?.url || '';
+
+          streamMetadata.isLive = true;
+          streamMetadata.activeLiveChatId = liveChatId;
+          streamMetadata.videoId = videoId;
+          streamMetadata.streamTitle = title;
+          if (thumb) streamMetadata.thumbnailUrl = thumb;
+          if (effectiveToken) cachedOAuthToken = effectiveToken;
+
+          nextChatPageToken = null;
+          pollYouTubeChat();
+
+          return res.json({
+            success: true,
+            activeLiveChatId: liveChatId,
+            videoId,
+            streamTitle: title,
+            thumbnailUrl: thumb,
+            isLive: true
+          });
+        }
+      }
+
+      // 2. Parse Video ID from URL or input
+      let videoId = (input || '').trim();
+      const urlMatch = videoId.match(/(?:youtube\.com\/(?:watch\?v=|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+      if (urlMatch) {
+        videoId = urlMatch[1];
+      }
+
+      if (videoId.length === 11) {
+        // Query Video details for liveStreamingDetails.activeLiveChatId
+        let videoUrl = `https://youtube.googleapis.com/youtube/v3/videos?part=snippet,liveStreamingDetails,statistics&id=${videoId}`;
+        if (apiKey) videoUrl += `&key=${apiKey}`;
+
+        const headers: Record<string, string> = {};
+        if (effectiveToken && !apiKey) headers['Authorization'] = `Bearer ${effectiveToken}`;
+
+        const vidRes = await fetch(videoUrl, { headers });
+        const vidData = await vidRes.json();
+
+        if (vidData.items && vidData.items.length > 0) {
+          const item = vidData.items[0];
+          const liveChatId = item.liveStreamingDetails?.activeLiveChatId;
+          const viewers = parseInt(item.liveStreamingDetails?.concurrentViewers || '0', 10);
+          const title = item.snippet?.title || streamMetadata.streamTitle;
+          const thumb = item.snippet?.thumbnails?.high?.url || item.snippet?.thumbnails?.default?.url || '';
+
+          streamMetadata.isLive = true;
+          streamMetadata.activeLiveChatId = liveChatId;
+          streamMetadata.videoId = videoId;
+          streamMetadata.streamTitle = title;
+          streamMetadata.viewerCount = viewers;
+          if (thumb) streamMetadata.thumbnailUrl = thumb;
+          if (effectiveToken) cachedOAuthToken = effectiveToken;
+
+          nextChatPageToken = null;
+          if (liveChatId) {
+            pollYouTubeChat();
+          }
+
+          return res.json({
+            success: true,
+            activeLiveChatId: liveChatId,
+            videoId,
+            streamTitle: title,
+            thumbnailUrl: thumb,
+            viewerCount: viewers,
+            isLive: true
+          });
+        }
+      }
+
+      return res.status(404).json({ error: "Could not find active YouTube live chat for the provided URL/ID." });
+    } catch (e: any) {
+      console.error("[YouTube Resolve Stream Error]", e);
+      return res.status(500).json({ error: e.message || "Failed to resolve stream" });
+    }
+  });
 
   // YouTube Stream Status & Broadcaster Listener Info
   app.get("/api/youtube/status", (_req, res) => {

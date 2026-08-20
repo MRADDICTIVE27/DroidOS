@@ -13,9 +13,18 @@ import {
   Check,
   Play,
   Pause,
-  HelpCircle
+  HelpCircle,
+  Link,
+  Unlink,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2,
+  Globe,
+  ExternalLink,
+  MessageSquare
 } from 'lucide-react';
 import { ChatMessage, BotIdentity, CustomRole, ViewerProfile, StreamLiveMetadata } from '../types';
+import { getAccessToken } from '../lib/googleAuth';
 
 interface LiveViewerTabProps {
   messages: ChatMessage[];
@@ -60,7 +69,166 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
   const [isEditingThumb, setIsEditingThumb] = useState(false);
   const [tempThumb, setTempThumb] = useState(streamMetadata.thumbnailUrl);
 
+  // Live Stream Connection State
+  const [streamUrlInput, setStreamUrlInput] = useState(streamMetadata.streamUrl || '');
+  const [isConnectingStream, setIsConnectingStream] = useState(false);
+  const [connectNotice, setConnectNotice] = useState<string | null>(null);
+  const [connectError, setConnectError] = useState<string | null>(null);
+  const [isSendingTestLiveMsg, setIsSendingTestLiveMsg] = useState(false);
+  const [testLiveMsgNotice, setTestLiveMsgNotice] = useState<string | null>(null);
+
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const handleConnectStream = async (inputToUse?: string) => {
+    const target = (inputToUse || streamUrlInput).trim();
+    if (!target) {
+      setConnectError('Please enter a YouTube live stream URL or Video ID');
+      return;
+    }
+
+    setIsConnectingStream(true);
+    setConnectError(null);
+    setConnectNotice(null);
+
+    try {
+      const token = getAccessToken();
+      const res = await fetch('/api/youtube/resolve-stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: target, token })
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'Failed to connect to YouTube live stream');
+      }
+
+      setStreamMetadata((prev) => ({
+        ...prev,
+        isLive: true,
+        activeLiveChatId: data.activeLiveChatId,
+        videoId: data.videoId,
+        streamTitle: data.streamTitle || prev.streamTitle,
+        thumbnailUrl: data.thumbnailUrl || prev.thumbnailUrl,
+        viewerCount: data.viewerCount !== undefined ? data.viewerCount : prev.viewerCount,
+        streamUrl: data.videoId ? `https://youtube.com/watch?v=${data.videoId}` : prev.streamUrl,
+        youtubeApiV3: {
+          ...prev.youtubeApiV3,
+          liveChatPolling: true,
+          serviceState: 'active'
+        }
+      }));
+
+      setIsListening(true);
+      setConnectNotice(`Connected to YouTube Live Chat (ID: ${data.activeLiveChatId || data.videoId})!`);
+      setTimeout(() => setConnectNotice(null), 5000);
+    } catch (err: any) {
+      setConnectError(err.message || 'Could not connect to live stream');
+    } finally {
+      setIsConnectingStream(false);
+    }
+  };
+
+  const handleAutoDetectBroadcast = async () => {
+    setIsConnectingStream(true);
+    setConnectError(null);
+    setConnectNotice(null);
+
+    try {
+      const token = getAccessToken();
+      if (!token) {
+        throw new Error('Please log in with your Google account first in the Authenticator tab');
+      }
+
+      const res = await fetch('/api/youtube/resolve-stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: '__MY_ACTIVE_BROADCAST__', token })
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'No active live broadcast found on your YouTube channel');
+      }
+
+      setStreamMetadata((prev) => ({
+        ...prev,
+        isLive: true,
+        activeLiveChatId: data.activeLiveChatId,
+        videoId: data.videoId,
+        streamTitle: data.streamTitle || prev.streamTitle,
+        thumbnailUrl: data.thumbnailUrl || prev.thumbnailUrl,
+        streamUrl: data.videoId ? `https://youtube.com/watch?v=${data.videoId}` : prev.streamUrl,
+        youtubeApiV3: {
+          ...prev.youtubeApiV3,
+          liveChatPolling: true,
+          serviceState: 'active'
+        }
+      }));
+
+      setIsListening(true);
+      setConnectNotice(`Auto-Detected Broadcast: "${data.streamTitle}" connected!`);
+      setTimeout(() => setConnectNotice(null), 5000);
+    } catch (err: any) {
+      setConnectError(err.message || 'Auto-detection failed');
+    } finally {
+      setIsConnectingStream(false);
+    }
+  };
+
+  const handleDisconnectStream = () => {
+    setStreamMetadata((prev) => ({
+      ...prev,
+      activeLiveChatId: null,
+      videoId: null,
+      youtubeApiV3: {
+        ...prev.youtubeApiV3,
+        liveChatPolling: false,
+        serviceState: 'offline'
+      }
+    }));
+    fetch('/api/youtube/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ activeLiveChatId: null, isLive: false })
+    }).catch(() => {});
+    setConnectNotice('Disconnected from YouTube Live Chat.');
+    setTimeout(() => setConnectNotice(null), 4000);
+  };
+
+  const handleSendTestLiveMessage = async () => {
+    setIsSendingTestLiveMsg(true);
+    setTestLiveMsgNotice(null);
+    try {
+      const token = getAccessToken();
+      const testContent = `🤖 [${botIdentity.botName}] Live bot connection verified! (${new Date().toLocaleTimeString()})`;
+      const res = await fetch('/api/youtube/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          message: testContent,
+          liveChatId: streamMetadata.activeLiveChatId,
+          accessToken: token,
+          sender: botIdentity.botName
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'Failed to send test message');
+      }
+
+      setTestLiveMsgNotice('Test message broadcasted to YouTube Live Chat!');
+      setTimeout(() => setTestLiveMsgNotice(null), 4000);
+    } catch (err: any) {
+      setConnectError(`Failed to send test message: ${err.message}`);
+    } finally {
+      setIsSendingTestLiveMsg(false);
+    }
+  };
 
   // Auto-scroll chat to bottom
   useEffect(() => {
@@ -256,6 +424,115 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
           </div>
         </div>
       )}
+
+      {/* YOUTUBE LIVE STREAM & CHAT SYNC CONTROLLER */}
+      <div className="bg-slate-900/90 border border-slate-800/90 rounded-2xl p-5 shadow-xl space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center border ${
+              streamMetadata.activeLiveChatId 
+                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' 
+                : 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+            }`}>
+              <Globe className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-white">YouTube Live Chat Sync Engine</h3>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide border ${
+                  streamMetadata.activeLiveChatId
+                    ? 'bg-emerald-950 text-emerald-300 border-emerald-700/60'
+                    : 'bg-rose-950 text-rose-300 border-rose-700/60'
+                }`}>
+                  {streamMetadata.activeLiveChatId ? '🟢 Live Connected' : '🔴 Offline / Not Connected'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                {streamMetadata.activeLiveChatId 
+                  ? `Active Live Chat ID: ${streamMetadata.activeLiveChatId} • Polling real YouTube viewers & comments in real-time.`
+                  : 'Connect to your live broadcast to read and respond to real live viewers.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {streamMetadata.activeLiveChatId ? (
+              <>
+                <button
+                  onClick={handleSendTestLiveMessage}
+                  disabled={isSendingTestLiveMsg}
+                  className="px-3 py-1.5 rounded-xl bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-500/40 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all"
+                  title="Broadcast a test verification message to YouTube chat"
+                >
+                  <MessageSquare className="w-3.5 h-3.5 text-purple-400" />
+                  <span>{isSendingTestLiveMsg ? 'Sending...' : 'Test Bot Broadcast'}</span>
+                </button>
+                <button
+                  onClick={handleDisconnectStream}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-300 text-xs font-medium flex items-center gap-1 cursor-pointer transition-all"
+                >
+                  <Unlink className="w-3.5 h-3.5" />
+                  <span>Disconnect</span>
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={handleAutoDetectBroadcast}
+                disabled={isConnectingStream}
+                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/20 cursor-pointer transition-all"
+              >
+                {isConnectingStream ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5 text-amber-300" />}
+                <span>Auto-Detect My Broadcast</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Input Bar when not connected or changing stream */}
+        <div className="pt-1 flex flex-wrap sm:flex-nowrap items-center gap-2">
+          <div className="relative flex-1">
+            <Link className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={streamUrlInput}
+              onChange={(e) => setStreamUrlInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleConnectStream();
+              }}
+              placeholder="Paste YouTube Stream URL or Video ID (e.g. https://www.youtube.com/watch?v=...)"
+              className="w-full bg-slate-950 border border-slate-700/80 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 font-mono"
+            />
+          </div>
+          <button
+            onClick={() => handleConnectStream()}
+            disabled={isConnectingStream || !streamUrlInput.trim()}
+            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all shadow-lg shadow-indigo-600/20 shrink-0"
+          >
+            {isConnectingStream ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Link className="w-3.5 h-3.5" />}
+            <span>{isConnectingStream ? 'Connecting...' : 'Connect Live Stream'}</span>
+          </button>
+        </div>
+
+        {/* Feedback / Notices */}
+        {connectNotice && (
+          <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-3 py-2 rounded-xl">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>{connectNotice}</span>
+          </div>
+        )}
+        {connectError && (
+          <div className="flex items-center gap-2 text-xs text-rose-400 bg-rose-950/60 border border-rose-800/60 px-3 py-2 rounded-xl">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{connectError}</span>
+          </div>
+        )}
+        {testLiveMsgNotice && (
+          <div className="flex items-center gap-2 text-xs text-purple-300 bg-purple-950/60 border border-purple-800/60 px-3 py-2 rounded-xl">
+            <Sparkles className="w-4 h-4 shrink-0 text-amber-300" />
+            <span>{testLiveMsgNotice}</span>
+          </div>
+        )}
+      </div>
 
       {/* MAIN LIVE CHAT & DISPATCH CONTROL */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
