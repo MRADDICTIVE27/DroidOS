@@ -89,6 +89,43 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
   const [authToken, setAuthToken] = useState<string | null>(getAccessToken());
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
+  // Diagnostic Inspector State
+  const [isCheckingDiagnostics, setIsCheckingDiagnostics] = useState(false);
+  const [diagResult, setDiagResult] = useState<any>(null);
+  const [showDiagPanel, setShowDiagPanel] = useState(false);
+
+  const runDiagnostics = async () => {
+    setIsCheckingDiagnostics(true);
+    setShowDiagPanel(true);
+    try {
+      const token = getAccessToken();
+      const res = await fetch('/api/youtube/diagnostic', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accessToken: token,
+          videoId: streamMetadata.videoId
+        })
+      });
+      const data = await res.json();
+      setDiagResult(data);
+    } catch (e: any) {
+      setDiagResult({
+        auth: { ok: false, message: e.message },
+        stream: { ok: false, message: 'Could not contact diagnostic server' },
+        permissions: {
+          ok: false,
+          message: 'Diagnostic check failed to complete.',
+          checklist: [
+            { name: 'Diagnostic Server', status: 'fail', details: e.message }
+          ]
+        }
+      });
+    } finally {
+      setIsCheckingDiagnostics(false);
+    }
+  };
+
   useEffect(() => {
     const unsubscribe = initAuth(
       (u, t) => {
@@ -645,26 +682,156 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {authToken || authUser ? (
-              <button
-                onClick={handleGoogleLogout}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all border border-slate-700"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Disconnect Account</span>
-              </button>
-            ) : (
-              <button
-                onClick={handleGoogleLogin}
-                disabled={isLoggingIn}
-                className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-blue-600/30 cursor-pointer transition-all disabled:opacity-50"
-              >
-                {isLoggingIn ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <LogIn className="w-3.5 h-3.5" />}
-                <span>{isLoggingIn ? 'Signing in...' : 'Sign in with Google (YouTube Access)'}</span>
-              </button>
-            )}
+            <button
+              onClick={runDiagnostics}
+              disabled={isCheckingDiagnostics}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
+              title="Inspect Google OAuth permissions, YouTube channel status, and live chat connectivity"
+            >
+              {isCheckingDiagnostics ? <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-400" /> : <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />}
+              <span>{isCheckingDiagnostics ? 'Running Check...' : 'Permissions & Chat Diagnostics'}</span>
+            </button>
+
+            <button
+              onClick={handleTestLiveMessage}
+              disabled={isSendingTestLiveMsg}
+              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all shadow-md shadow-purple-600/20 disabled:opacity-50"
+              title="Broadcast a test announcement from DroidBot directly into your YouTube live chat room"
+            >
+              {isSendingTestLiveMsg ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-amber-300" />}
+              <span>{isSendingTestLiveMsg ? 'Broadcasting...' : 'Test Bot Broadcast'}</span>
+            </button>
           </div>
         </div>
+
+        {/* YouTube Diagnostics & Troubleshooting Panel */}
+        {showDiagPanel && (
+          <div className="p-4 rounded-xl bg-slate-950 border border-indigo-500/40 text-xs space-y-3 animate-in fade-in slide-in-from-top duration-200">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-indigo-400" />
+                <span className="font-bold text-white text-sm">YouTube Live Chat Permissions & Setup Diagnostics</span>
+              </div>
+              <button
+                onClick={() => setShowDiagPanel(false)}
+                className="text-slate-400 hover:text-white p-1 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {isCheckingDiagnostics ? (
+              <div className="py-6 flex flex-col items-center justify-center gap-2 text-slate-400">
+                <RefreshCw className="w-6 h-6 animate-spin text-indigo-400" />
+                <p>Verifying Google OAuth token, YouTube channel profile, and live stream chat ID...</p>
+              </div>
+            ) : diagResult ? (
+              <div className="space-y-3">
+                <div className={`p-2.5 rounded-lg border flex items-center gap-2 font-medium ${
+                  diagResult.permissions?.ok
+                    ? 'bg-emerald-950/50 border-emerald-800/60 text-emerald-300'
+                    : 'bg-amber-950/50 border-amber-800/60 text-amber-300'
+                }`}>
+                  {diagResult.permissions?.ok ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                  )}
+                  <span>{diagResult.permissions?.message}</span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {/* Step 1 */}
+                  <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-200">1. Google OAuth Scope</span>
+                      <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-semibold ${
+                        authToken ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-rose-950 text-rose-300 border border-rose-800'
+                      }`}>
+                        {authToken ? 'PASSED' : 'ACTION NEEDED'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      Requires Google authentication with <code className="text-indigo-300 font-mono">youtube.force-ssl</code> scope.
+                    </p>
+                    {!authToken && (
+                      <button
+                        onClick={handleGoogleLogin}
+                        className="mt-1 w-full py-1 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] cursor-pointer"
+                      >
+                        Sign in with Google
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Step 2 */}
+                  <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-200">2. YouTube Channel</span>
+                      <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-semibold ${
+                        diagResult.auth?.ok ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-rose-950 text-rose-300 border border-rose-800'
+                      }`}>
+                        {diagResult.auth?.ok ? 'READY' : 'ACTION NEEDED'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      {diagResult.auth?.message || 'Checking YouTube channel status...'}
+                    </p>
+                    {diagResult.auth?.userChannel && (
+                      <div className="text-[11px] text-emerald-400 font-medium">
+                        Channel: {diagResult.auth.userChannel.title}
+                      </div>
+                    )}
+                    {!diagResult.auth?.ok && (
+                      <a
+                        href="https://www.youtube.com/create_channel"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 w-full py-1 inline-flex items-center justify-center gap-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-bold text-[11px]"
+                      >
+                        <span>Create YouTube Channel</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+
+                  {/* Step 3 */}
+                  <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-200">3. Live Chat Room</span>
+                      <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-semibold ${
+                        diagResult.stream?.ok ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-amber-950 text-amber-300 border border-amber-800'
+                      }`}>
+                        {diagResult.stream?.ok ? 'CONNECTED' : 'STANDBY'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      {diagResult.stream?.message || 'Checking stream connection...'}
+                    </p>
+                    {diagResult.stream?.activeLiveChatId && (
+                      <div className="text-[10px] text-slate-500 font-mono truncate">
+                        ID: {diagResult.stream.activeLiveChatId}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Additional Guidance */}
+                <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-800/80 text-[11px] text-slate-400 space-y-1">
+                  <div className="font-semibold text-slate-300 flex items-center gap-1.5">
+                    <HelpCircle className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>YouTube Chat Permission & Delivery Guide:</span>
+                  </div>
+                  <ul className="list-disc pl-4 space-y-1">
+                    <li><strong className="text-slate-300">Channel Ownership:</strong> The Google account used to sign in must have clicked "Create Channel" on YouTube at least once (even with 0 videos). YouTube API cannot post messages anonymously without a channel identity.</li>
+                    <li><strong className="text-slate-300">Live Status:</strong> The stream must be in "Live" status in YouTube Studio. Scheduled streams or offline videos do not have an open chat room to receive messages.</li>
+                    <li><strong className="text-slate-300">Moderator Role (Recommended):</strong> If your bot signs in with a secondary Google account (e.g. DroidBot), make sure to add it as a <em>Standard Moderator</em> in your channel's YouTube Studio (<code className="text-slate-300">Settings &gt; Community</code>) to bypass slow mode and rate limits.</li>
+                  </ul>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )}
 
         {/* Feedback / Notices */}
         {connectNotice && (

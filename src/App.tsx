@@ -760,7 +760,23 @@ export const App: React.FC = () => {
           videoId: streamMetadata.videoId,
           accessToken: token
         })
-      }).catch((e) => console.warn('[YouTube Chat Send Warning]', e));
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            addLog('warn', 'YouTube API', `Broadcast failed: ${errData.error || 'HTTP ' + res.status}`);
+            return;
+          }
+          const data = await res.json().catch(() => ({}));
+          if (data?.success && !data?.localOnly) {
+            addLog('info', 'YouTube API', `✓ Posted to YouTube Live Chat (ID: ${data.item?.id || 'OK'})`);
+          } else if (data?.error) {
+            addLog('warn', 'YouTube API', `YouTube Outbound notice: ${data.error}`);
+          }
+        })
+        .catch((e) => {
+          addLog('warn', 'YouTube API', `Broadcast network error: ${e.message}`);
+        });
     },
     [botIdentity.botName, streamMetadata.activeLiveChatId, streamMetadata.videoId, addLog]
   );
@@ -770,27 +786,28 @@ export const App: React.FC = () => {
     async (sender: string, content: string, explicitRole?: string, customId?: string) => {
       const now = new Date().toLocaleTimeString();
       const safeSender = typeof sender === 'string' ? sender : 'Anonymous';
-      const senderKey = safeSender.trim().toLowerCase();
+      const cleanSender = safeSender.startsWith('@') ? safeSender.substring(1) : safeSender;
+      const senderKey = cleanSender.trim().toLowerCase();
       const messageId = customId || `msg-user-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
       processedChatMsgIdsRef.current.add(messageId);
 
       // Detect if chatter is the streamer / channel owner
       const isStreamer =
         explicitRole === 'owner' ||
-        senderKey === botIdentity.streamerName.trim().toLowerCase() ||
+        senderKey === botIdentity.streamerName.replace('@', '').trim().toLowerCase() ||
         senderKey === botIdentity.channelName.replace('@', '').trim().toLowerCase() ||
-        senderKey === (streamMetadata.streamerAuth?.accountName || '').trim().toLowerCase() ||
-        senderKey === (currentUser?.displayName || '').trim().toLowerCase();
+        senderKey === (streamMetadata.streamerAuth?.accountName || '').replace('@', '').trim().toLowerCase() ||
+        senderKey === (currentUser?.displayName || '').replace('@', '').trim().toLowerCase();
 
       let role = isStreamer ? 'owner' : (explicitRole || 'viewer');
-      const foundProfile = profiles.find((p) => p.username.toLowerCase() === senderKey);
+      const foundProfile = profiles.find((p) => p.username.replace('@', '').toLowerCase() === senderKey);
       if (foundProfile) {
         role = isStreamer ? 'owner' : (explicitRole || foundProfile.role);
       }
 
       const userMsg: ChatMessage = {
         id: messageId,
-        sender: safeSender.trim(),
+        sender: cleanSender.trim(),
         senderRole: role,
         content: content.trim(),
         timestamp: now
@@ -1141,6 +1158,7 @@ export const App: React.FC = () => {
         const queryParams = new URLSearchParams();
         if (lastFetchedChatIdRef.current) queryParams.set('lastId', lastFetchedChatIdRef.current);
         if (token) queryParams.set('token', token);
+        if (streamMetadata.videoId) queryParams.set('videoId', streamMetadata.videoId);
 
         const url = `/api/youtube/chat${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
         const res = await fetch(url);
@@ -1187,7 +1205,7 @@ export const App: React.FC = () => {
     syncChat();
 
     return () => clearInterval(interval);
-  }, [isLive, isListening, botIdentity.botName]);
+  }, [isLive, isListening, botIdentity.botName, streamMetadata.videoId]);
 
   const handleSendBotMessage = (content: string) => {
     dispatchBotReply(content, 'Manual Broadcaster Dispatch');
