@@ -174,11 +174,7 @@ export const App: React.FC = () => {
           if (parsed.redeems) setRedeems(parsed.redeems);
           if (parsed.obsConfig) setObsConfig(parsed.obsConfig);
           if (parsed.tabOrder) {
-            if (!parsed.tabOrder.includes('obs-overlay')) {
-              setTabOrder([...parsed.tabOrder, 'obs-overlay']);
-            } else {
-              setTabOrder(parsed.tabOrder);
-            }
+            setTabOrder(Array.from(new Set([...parsed.tabOrder, 'obs-overlay'])));
           }
           if (parsed.theme) setTheme(parsed.theme);
           if (parsed.shoutoutConfig) setShoutoutConfig(parsed.shoutoutConfig);
@@ -254,7 +250,7 @@ export const App: React.FC = () => {
         if (parsed.soundEffects) setSoundEffects(parsed.soundEffects);
         if (parsed.redeems) setRedeems(parsed.redeems);
         if (parsed.obsConfig) setObsConfig(parsed.obsConfig);
-        if (parsed.tabOrder) setTabOrder(parsed.tabOrder);
+        if (parsed.tabOrder) setTabOrder(Array.from(new Set([...parsed.tabOrder, 'obs-overlay'])));
         if (parsed.theme) setTheme(parsed.theme);
         if (parsed.shoutoutConfig) setShoutoutConfig(parsed.shoutoutConfig);
         if (parsed.gameState) setGameState(parsed.gameState);
