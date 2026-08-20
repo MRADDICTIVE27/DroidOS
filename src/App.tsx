@@ -81,9 +81,10 @@ import {
 import { processIncomingMessage, queryAiEngine, checkAchievementProgress } from './services/botEngine';
 import { playSynthesizedSound, playCustomAudioUrl } from './services/soundService';
 
-const getInitialSavedState = () => {
+const getInitialSavedState = (uid?: string | null) => {
   try {
-    const saved = localStorage.getItem('droidos_state');
+    const storageKey = uid ? `droidos_state_${uid}` : 'droidos_state_guest';
+    const saved = localStorage.getItem(storageKey);
     if (saved) {
       return JSON.parse(saved);
     }
@@ -98,7 +99,8 @@ export const App: React.FC = () => {
     return <Overlay />;
   }
 
-  const savedState = getInitialSavedState();
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const savedState = getInitialSavedState(currentUserId);
 
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [theme, setTheme] = useState<AppTheme>(() => savedState?.theme || 'dark');
@@ -160,12 +162,30 @@ export const App: React.FC = () => {
     savedState?.obsConfig ? { ...INITIAL_OBS_CONFIG, ...savedState.obsConfig } : INITIAL_OBS_CONFIG
   );
   const [automations, setAutomations] = useState<AutomationTask[]>(() => savedState?.automations || INITIAL_AUTOMATIONS);
-  const [streamMetadata, setStreamMetadata] = useState<StreamLiveMetadata>(INITIAL_STREAM_METADATA);
+  const [streamMetadata, setStreamMetadata] = useState<StreamLiveMetadata>(() => {
+    if (!savedState?.streamMetadata) return INITIAL_STREAM_METADATA;
+    return {
+      ...INITIAL_STREAM_METADATA,
+      ...savedState.streamMetadata,
+      streamerAuth: {
+        ...INITIAL_STREAM_METADATA.streamerAuth,
+        ...(savedState.streamMetadata.streamerAuth || {})
+      },
+      botAuth: {
+        ...INITIAL_STREAM_METADATA.botAuth,
+        ...(savedState.streamMetadata.botAuth || {})
+      },
+      youtubeApiV3: {
+        ...INITIAL_STREAM_METADATA.youtubeApiV3,
+        ...(savedState.streamMetadata.youtubeApiV3 || {})
+      }
+    };
+  });
   const [releaseInfo, setReleaseInfo] = useState(INITIAL_RELEASE_INFO);
   const [shoutoutConfig, setShoutoutConfig] = useState<ShoutoutConfig>(() =>
     savedState?.shoutoutConfig ? { ...INITIAL_SHOUTOUT_CONFIG, ...savedState.shoutoutConfig } : INITIAL_SHOUTOUT_CONFIG
   );
-  const [shoutoutHistory, setShoutoutHistory] = useState<ShoutoutHistoryItem[]>(INITIAL_SHOUTOUT_HISTORY);
+  const [shoutoutHistory, setShoutoutHistory] = useState<ShoutoutHistoryItem[]>(() => savedState?.shoutoutHistory || INITIAL_SHOUTOUT_HISTORY);
   const [activeShoutout, setActiveShoutout] = useState<ActiveShoutoutOverlay | null>(null);
   const [audioQueue, setAudioQueue] = useState<AudioQueueItem[]>([]);
   const [isProcessingQueue, setIsProcessingQueue] = useState<boolean>(false);
@@ -199,25 +219,35 @@ export const App: React.FC = () => {
   useEffect(() => {
     const unsubscribe = initAuth((user) => {
       setCurrentUser(user);
+      setCurrentUserId(user.uid);
       if (user) {
-        // Load cloud state on login
         setIsCloudSyncing(true);
         loadStateFromCloud().then((parsed) => {
           if (parsed) {
             if (parsed.botIdentity) setBotIdentity(prev => ({ ...prev, ...parsed.botIdentity }));
             if (parsed.roles) setRoles(parsed.roles);
             if (parsed.profiles) setProfiles(parsed.profiles);
+            if (parsed.responseStyles) setResponseStyles(parsed.responseStyles);
             if (parsed.triggers) setTriggers(parsed.triggers);
             if (parsed.pointsConfig) setPointsConfig(parsed.pointsConfig);
             if (parsed.achievements) setAchievements(parsed.achievements);
             if (parsed.soundEffects) setSoundEffects(parsed.soundEffects);
             if (parsed.redeems) setRedeems(parsed.redeems);
             if (parsed.obsConfig) setObsConfig(parsed.obsConfig);
+            if (parsed.automations) setAutomations(parsed.automations);
+            if (parsed.streamMetadata) setStreamMetadata(prev => ({
+              ...prev,
+              ...parsed.streamMetadata,
+              streamerAuth: { ...prev.streamerAuth, ...(parsed.streamMetadata.streamerAuth || {}) },
+              botAuth: { ...prev.botAuth, ...(parsed.streamMetadata.botAuth || {}) },
+              youtubeApiV3: { ...prev.youtubeApiV3, ...(parsed.streamMetadata.youtubeApiV3 || {}) }
+            }));
             if (parsed.tabOrder) {
               setTabOrder(Array.from(new Set([...parsed.tabOrder, 'obs-overlay'])));
             }
             if (parsed.theme) setTheme(parsed.theme);
             if (parsed.shoutoutConfig) setShoutoutConfig(parsed.shoutoutConfig);
+            if (parsed.shoutoutHistory) setShoutoutHistory(parsed.shoutoutHistory);
             if (parsed.gameState) setGameState(parsed.gameState);
             showToast('Settings synced from cloud workspace');
           }
@@ -226,9 +256,81 @@ export const App: React.FC = () => {
       }
     }, () => {
       setCurrentUser(null);
+      setCurrentUserId(null);
+      setBotIdentity(INITIAL_BOT_IDENTITY);
+      setRoles(INITIAL_ROLES);
+      setProfiles(INITIAL_PROFILES);
+      setResponseStyles(INITIAL_RESPONSE_STYLES);
+      setTriggers(INITIAL_TRIGGERS);
+      setPointsConfig(INITIAL_POINTS_CONFIG);
+      setAchievements(INITIAL_ACHIEVEMENTS);
+      setSoundEffects(INITIAL_SOUND_EFFECTS);
+      setRedeems(INITIAL_REDEEMS);
+      setObsConfig(INITIAL_OBS_CONFIG);
+      setAutomations(INITIAL_AUTOMATIONS);
+      setStreamMetadata(INITIAL_STREAM_METADATA);
+      setTabOrder([
+        'dashboard',
+        'liveviewer',
+        'personalities',
+        'points',
+        'redeems',
+        'achievements',
+        'games',
+        'soundeffects',
+        'obs',
+        'identity',
+        'authenticator',
+        'memory',
+        'roles',
+        'profiles',
+        'cloudbackup',
+        'general',
+        'custom',
+        'automations',
+        'analytics',
+        'telemetry',
+        'updates',
+        'settings'
+      ]);
+      setTheme('dark');
+      setShoutoutConfig(INITIAL_SHOUTOUT_CONFIG);
+      setShoutoutHistory(INITIAL_SHOUTOUT_HISTORY);
+      setGameState(INITIAL_GAME_STATE);
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+
+    const seededState = getInitialSavedState(currentUserId);
+    if (!seededState) return;
+
+    if (seededState.botIdentity) setBotIdentity(prev => ({ ...prev, ...seededState.botIdentity }));
+    if (seededState.roles) setRoles(seededState.roles);
+    if (seededState.profiles) setProfiles(seededState.profiles);
+    if (seededState.responseStyles) setResponseStyles(seededState.responseStyles);
+    if (seededState.triggers) setTriggers(seededState.triggers);
+    if (seededState.pointsConfig) setPointsConfig(seededState.pointsConfig);
+    if (seededState.achievements) setAchievements(seededState.achievements);
+    if (seededState.soundEffects) setSoundEffects(seededState.soundEffects);
+    if (seededState.redeems) setRedeems(seededState.redeems);
+    if (seededState.obsConfig) setObsConfig(seededState.obsConfig);
+    if (seededState.automations) setAutomations(seededState.automations);
+    if (seededState.streamMetadata) setStreamMetadata(prev => ({
+      ...prev,
+      ...seededState.streamMetadata,
+      streamerAuth: { ...prev.streamerAuth, ...(seededState.streamMetadata.streamerAuth || {}) },
+      botAuth: { ...prev.botAuth, ...(seededState.streamMetadata.botAuth || {}) },
+      youtubeApiV3: { ...prev.youtubeApiV3, ...(seededState.streamMetadata.youtubeApiV3 || {}) }
+    }));
+    if (seededState.tabOrder) setTabOrder(Array.from(new Set([...seededState.tabOrder, 'obs-overlay'])));
+    if (seededState.theme) setTheme(seededState.theme);
+    if (seededState.shoutoutConfig) setShoutoutConfig(seededState.shoutoutConfig);
+    if (seededState.shoutoutHistory) setShoutoutHistory(seededState.shoutoutHistory);
+    if (seededState.gameState) setGameState(seededState.gameState);
+  }, [currentUserId]);
   const [aiEngineStatus, setAiEngineStatus] = useState<{ status: 'online' | 'degraded' | 'offline', error?: string }>({ status: 'online' });
 
   // Chat Feed
@@ -283,28 +385,33 @@ export const App: React.FC = () => {
       botIdentity,
       roles,
       profiles,
+      responseStyles,
       triggers,
       pointsConfig,
       achievements,
       soundEffects,
       redeems,
       obsConfig,
+      automations,
+      streamMetadata,
       tabOrder,
       theme,
       shoutoutConfig,
+      shoutoutHistory,
       gameState
     };
+
+    const storageKey = currentUser?.uid ? `droidos_state_${currentUser.uid}` : 'droidos_state_guest';
     try {
-      localStorage.setItem('droidos_state', JSON.stringify(stateToSave));
+      localStorage.setItem(storageKey, JSON.stringify(stateToSave));
     } catch (e) {
       console.warn('[DroidOS Persistence] Failed to save state:', e);
     }
-    
-    // Save to cloud if user is logged in
+
     if (currentUser) {
       saveStateToCloud(stateToSave);
     }
-  }, [botIdentity, roles, profiles, triggers, pointsConfig, achievements, soundEffects, redeems, obsConfig, tabOrder, theme, shoutoutConfig, gameState, currentUser, isCloudSyncing]);
+  }, [botIdentity, roles, profiles, responseStyles, triggers, pointsConfig, achievements, soundEffects, redeems, obsConfig, automations, streamMetadata, tabOrder, theme, shoutoutConfig, shoutoutHistory, gameState, currentUser, isCloudSyncing]);
 
 
   const greetedUsersRef = useRef<Set<string>>(new Set(['channelowner']));
@@ -753,6 +860,7 @@ export const App: React.FC = () => {
           ...(token ? { Authorization: `Bearer ${token}` } : {})
         },
         body: JSON.stringify({
+          uid: currentUser?.uid || 'guest',
           message: replyText,
           sender: botIdentity.botName,
           senderRole: 'bot',
@@ -1159,6 +1267,7 @@ export const App: React.FC = () => {
         if (lastFetchedChatIdRef.current) queryParams.set('lastId', lastFetchedChatIdRef.current);
         if (token) queryParams.set('token', token);
         if (streamMetadata.videoId) queryParams.set('videoId', streamMetadata.videoId);
+        queryParams.set('uid', currentUser?.uid || 'guest');
 
         const url = `/api/youtube/chat${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
         const res = await fetch(url);

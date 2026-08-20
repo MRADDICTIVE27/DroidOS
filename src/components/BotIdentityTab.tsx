@@ -255,6 +255,16 @@ export const BotIdentityTab: React.FC<BotIdentityTabProps> = ({
             </div>
 
             <label className="flex items-center justify-between p-2 rounded-xl bg-slate-950/70 border border-slate-800/60 cursor-pointer">
+              <span className="text-slate-300 font-medium">AI Responses Enabled</span>
+              <input
+                type="checkbox"
+                checked={formState.geminiEnabled}
+                onChange={(e) => handleChange('geminiEnabled', e.target.checked)}
+                className="w-4 h-4 accent-purple-500 rounded cursor-pointer"
+              />
+            </label>
+
+            <label className="flex items-center justify-between p-2 rounded-xl bg-slate-950/70 border border-slate-800/60 cursor-pointer">
               <span className="text-slate-300 font-medium">Auto-Greet New Viewers</span>
               <input
                 type="checkbox"
@@ -271,6 +281,16 @@ export const BotIdentityTab: React.FC<BotIdentityTabProps> = ({
                 checked={formState.autoQuestions}
                 onChange={(e) => handleChange('autoQuestions', e.target.checked)}
                 className="w-4 h-4 accent-blue-500 rounded cursor-pointer"
+              />
+            </label>
+
+            <label className="flex items-center justify-between p-2 rounded-xl bg-slate-950/70 border border-slate-800/60 cursor-pointer">
+              <span className="text-slate-300 font-medium">Use Local AI Fallback When Cloud Is Down</span>
+              <input
+                type="checkbox"
+                checked={formState.autoAiFallback}
+                onChange={(e) => handleChange('autoAiFallback', e.target.checked)}
+                className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"
               />
             </label>
           </div>

@@ -62,6 +62,10 @@ service cloud.firestore {
     match /workspaces/{userId} {
       allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
+
+    match /users/{userId}/state/{doc} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
     
     match /viewers/{viewerId} {
       // Hardened: PII Isolation - only owner or admin can read sensitive viewer profiles

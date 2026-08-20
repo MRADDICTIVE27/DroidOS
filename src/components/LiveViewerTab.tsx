@@ -185,7 +185,7 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
       const res = await fetch('/api/youtube/resolve-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: target, token })
+        body: JSON.stringify({ input: target, token, uid: (window as any)?.localStorage?.getItem('droidos_user_uid') || 'guest' })
       });
 
       let data: any = {};
@@ -241,7 +241,7 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
       const res = await fetch('/api/youtube/resolve-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: '__MY_ACTIVE_BROADCAST__', token })
+        body: JSON.stringify({ input: '__MY_ACTIVE_BROADCAST__', token, uid: (window as any)?.localStorage?.getItem('droidos_user_uid') || 'guest' })
       });
 
       let data: any = {};
@@ -693,7 +693,7 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
             </button>
 
             <button
-              onClick={handleTestLiveMessage}
+              onClick={handleSendTestLiveMessage}
               disabled={isSendingTestLiveMsg}
               className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all shadow-md shadow-purple-600/20 disabled:opacity-50"
               title="Broadcast a test announcement from DroidBot directly into your YouTube live chat room"
