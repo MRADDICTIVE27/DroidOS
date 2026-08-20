@@ -1575,6 +1575,10 @@ export const App: React.FC = () => {
                 onSaveNotice={() => showToast('Settings applied.')}
               />
             )}
+
+            {activeTab === 'obs-overlay' && (
+              <ObsOverlayTab />
+            )}
           </>
         )}
       </main>
