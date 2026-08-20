@@ -4,7 +4,6 @@ import { initFirebase } from './firebase';
 
 
 const provider = new GoogleAuthProvider();
-provider.setCustomParameters({ prompt: 'select_account' });
 // The scopes confirmed by user
 const SCOPES = [
   'https://www.googleapis.com/auth/youtube.readonly'
