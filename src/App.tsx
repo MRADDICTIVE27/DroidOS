@@ -308,6 +308,8 @@ export const App: React.FC = () => {
 
 
   const greetedUsersRef = useRef<Set<string>>(new Set(['channelowner']));
+  const processedChatMsgIdsRef = useRef<Set<string>>(new Set());
+  const lastFetchedChatIdRef = useRef<string | null>(null);
 
   const addLog = useCallback(
     (level: SystemLog['level'], module: SystemLog['module'], message: string) => {
@@ -726,8 +728,11 @@ export const App: React.FC = () => {
   // Centralized Bot Reply Dispatcher (Local chat feed + Live YouTube chat broadcasting)
   const dispatchBotReply = useCallback(
     (replyText: string, matchedRule?: string, isAi?: boolean) => {
+      const botMsgId = `msg-bot-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      processedChatMsgIdsRef.current.add(botMsgId);
+
       const botMsg: ChatMessage = {
-        id: `msg-bot-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        id: botMsgId,
         sender: botIdentity.botName,
         senderRole: 'bot',
         isBot: true,
@@ -752,19 +757,22 @@ export const App: React.FC = () => {
           sender: botIdentity.botName,
           senderRole: 'bot',
           liveChatId: streamMetadata.activeLiveChatId,
+          videoId: streamMetadata.videoId,
           accessToken: token
         })
       }).catch((e) => console.warn('[YouTube Chat Send Warning]', e));
     },
-    [botIdentity.botName, streamMetadata.activeLiveChatId, addLog]
+    [botIdentity.botName, streamMetadata.activeLiveChatId, streamMetadata.videoId, addLog]
   );
 
   // Incoming Message Handler
   const handleIncomingMessage = useCallback(
-    async (sender: string, content: string, explicitRole?: string) => {
+    async (sender: string, content: string, explicitRole?: string, customId?: string) => {
       const now = new Date().toLocaleTimeString();
       const safeSender = typeof sender === 'string' ? sender : 'Anonymous';
       const senderKey = safeSender.trim().toLowerCase();
+      const messageId = customId || `msg-user-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      processedChatMsgIdsRef.current.add(messageId);
 
       // Detect if chatter is the streamer / channel owner
       const isStreamer =
@@ -781,14 +789,17 @@ export const App: React.FC = () => {
       }
 
       const userMsg: ChatMessage = {
-        id: `msg-user-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        id: messageId,
         sender: safeSender.trim(),
         senderRole: role,
         content: content.trim(),
         timestamp: now
       };
 
-      setMessages((prev) => [...prev, userMsg]);
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === messageId)) return prev;
+        return [...prev, userMsg];
+      });
 
       // Award points per chat message & update viewer stats
       setProfiles((prev) => {
@@ -1113,30 +1124,58 @@ export const App: React.FC = () => {
   );
 
 
+  const handleIncomingMessageRef = useRef(handleIncomingMessage);
+  useEffect(() => {
+    handleIncomingMessageRef.current = handleIncomingMessage;
+  });
+
   // --- Real-time Chat Sync Poller ---
   useEffect(() => {
     if (!isLive || !isListening) return;
 
-    let lastFetchedId: string | null = null;
-    const pollInterval = 3500; // 3.5 seconds
+    const pollInterval = 2500; // 2.5 seconds snappy update
 
     const syncChat = async () => {
       try {
         const token = getAccessToken();
         const queryParams = new URLSearchParams();
-        if (lastFetchedId) queryParams.set('lastId', lastFetchedId);
+        if (lastFetchedChatIdRef.current) queryParams.set('lastId', lastFetchedChatIdRef.current);
         if (token) queryParams.set('token', token);
 
         const url = `/api/youtube/chat${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
         const res = await fetch(url);
+        if (!res.ok) return;
         const newMsgs = await res.json();
 
         if (Array.isArray(newMsgs) && newMsgs.length > 0) {
-          lastFetchedId = newMsgs[newMsgs.length - 1].id;
+          lastFetchedChatIdRef.current = newMsgs[newMsgs.length - 1].id;
           
           // Inject into local processing engine
           newMsgs.forEach((msg: any) => {
-            handleIncomingMessage(msg.sender, msg.content, msg.senderRole);
+            if (!msg || !msg.id) return;
+            if (processedChatMsgIdsRef.current.has(msg.id)) return;
+            processedChatMsgIdsRef.current.add(msg.id);
+
+            if (msg.isBot) {
+              setMessages((prev) => {
+                if (prev.some((m) => m.id === msg.id)) return prev;
+                return [
+                  ...prev,
+                  {
+                    id: msg.id,
+                    sender: msg.sender || botIdentity.botName,
+                    senderRole: msg.senderRole || 'bot',
+                    isBot: true,
+                    content: msg.content,
+                    timestamp: msg.timestamp || new Date().toLocaleTimeString()
+                  }
+                ];
+              });
+              return;
+            }
+
+            // Normal chatter -> process triggers, roles, points, ai responses
+            handleIncomingMessageRef.current(msg.sender, msg.content, msg.senderRole, msg.id);
           });
         }
       } catch (err) {
@@ -1148,7 +1187,7 @@ export const App: React.FC = () => {
     syncChat();
 
     return () => clearInterval(interval);
-  }, [isLive, isListening, handleIncomingMessage]);
+  }, [isLive, isListening, botIdentity.botName]);
 
   const handleSendBotMessage = (content: string) => {
     dispatchBotReply(content, 'Manual Broadcaster Dispatch');

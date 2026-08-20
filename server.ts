@@ -64,23 +64,28 @@ async function startServer() {
   let innertubeApiKey: string = "AIzaSyAO_FJ2SlqU8Q4usACZaau0dsnYwcWsj2g"; // Default public YouTube web client key
   let innertubeContinuation: string | null = null;
 
+  // 1. YouTube Live Chat poller subroutine
   async function pollYouTubeChat() {
+    if (chatPollTimeout) {
+      clearTimeout(chatPollTimeout);
+      chatPollTimeout = null;
+    }
+
     const apiKey = process.env.YOUTUBE_API_KEY;
     const chatId = streamMetadata.activeLiveChatId;
     const token = cachedOAuthToken;
+    const videoId = streamMetadata.videoId;
 
     if (!streamMetadata.isLive) {
-      if (chatPollTimeout) clearTimeout(chatPollTimeout);
-      chatPollTimeout = null;
       return;
     }
 
     try {
       // 1. Try Official YouTube Data API v3 if API key or OAuth token is available and chatId is a valid LiveChat ID
       if ((apiKey || token) && chatId && !chatId.startsWith('public-')) {
-        let url = `https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=${chatId}&part=snippet,authorDetails&maxResults=100`;
+        let url = `https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=${encodeURIComponent(chatId)}&part=snippet,authorDetails&maxResults=100`;
         if (apiKey) url += `&key=${apiKey}`;
-        if (nextChatPageToken) url += `&pageToken=${nextChatPageToken}`;
+        if (nextChatPageToken) url += `&pageToken=${encodeURIComponent(nextChatPageToken)}`;
 
         const headers: Record<string, string> = {};
         if (token && !apiKey) headers["Authorization"] = `Bearer ${token}`;
@@ -105,13 +110,32 @@ async function startServer() {
           }
 
           nextChatPageToken = data.nextPageToken;
-          const waitTime = data.pollingIntervalMillis || 4000;
-          chatPollTimeout = setTimeout(pollYouTubeChat, waitTime);
+          const waitTime = data.pollingIntervalMillis || 3000;
+          chatPollTimeout = setTimeout(pollYouTubeChat, Math.max(2500, waitTime));
           return;
         }
       }
 
-      // 2. Fallback: Public InnerTube Live Chat polling for public YouTube streams
+      // 2. Innertube Public Live Chat Polling (Universal scraper for any public live stream)
+      if (!innertubeContinuation && videoId) {
+        try {
+          const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+          const pageRes = await fetch(watchUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+              'Accept-Language': 'en-US,en;q=0.9',
+            }
+          });
+          const html = await pageRes.text();
+          const keyMatch = html.match(/"INNERTUBE_API_KEY":"([^"]+)"/i) || html.match(/INNERTUBE_API_KEY\\":\\"([^"\\]+)\\"/i);
+          const contMatch = html.match(/"continuation":"([A-Za-z0-9_-]{20,})"/i) || html.match(/continuation\\":\\"([A-Za-z0-9_-]{20,})\\"/i);
+          if (keyMatch && keyMatch[1]) innertubeApiKey = keyMatch[1];
+          if (contMatch && contMatch[1]) innertubeContinuation = contMatch[1];
+        } catch (scrapeErr) {
+          console.warn('[Innertube Refresh Failed]', scrapeErr);
+        }
+      }
+
       if (innertubeContinuation && innertubeApiKey) {
         const innertubeUrl = `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=${innertubeApiKey}`;
         const innertubeRes = await fetch(innertubeUrl, {
@@ -173,23 +197,25 @@ async function startServer() {
             const continuations = liveChatContinuation?.continuations || [];
             const nextCont = continuations[0]?.invalidationContinuationData?.continuation ||
                              continuations[0]?.timedContinuationData?.continuation;
-            const timeoutMs = continuations[0]?.timedContinuationData?.timeoutMs || 4000;
+            const timeoutMs = continuations[0]?.timedContinuationData?.timeoutMs || 3000;
 
             if (nextCont) {
               innertubeContinuation = nextCont;
+            } else {
+              innertubeContinuation = null;
             }
 
-            chatPollTimeout = setTimeout(pollYouTubeChat, Math.max(3000, timeoutMs));
+            chatPollTimeout = setTimeout(pollYouTubeChat, Math.max(2500, timeoutMs));
             return;
           }
         }
       }
 
       // Default idle poll
-      chatPollTimeout = setTimeout(pollYouTubeChat, 6000);
+      chatPollTimeout = setTimeout(pollYouTubeChat, 4000);
     } catch (error) {
       console.error("[YouTube Chat Poller Error]", error);
-      chatPollTimeout = setTimeout(pollYouTubeChat, 8000);
+      chatPollTimeout = setTimeout(pollYouTubeChat, 5000);
     }
   }
 
@@ -217,13 +243,33 @@ async function startServer() {
 
   // API to send message to YouTube Live Chat
   app.post("/api/youtube/send", async (req, res) => {
-    const { message, liveChatId, accessToken } = req.body;
+    const { message, liveChatId, accessToken, videoId } = req.body;
     const cleanMsg = (message || "").trim();
-    const activeChatId = liveChatId || streamMetadata.activeLiveChatId;
-    const token = accessToken || req.headers.authorization?.replace("Bearer ", "");
+    let activeChatId = liveChatId || streamMetadata.activeLiveChatId;
+    const token = accessToken || req.headers.authorization?.replace("Bearer ", "") || cachedOAuthToken;
+    const targetVideoId = videoId || streamMetadata.videoId;
 
     if (!cleanMsg) {
       return res.status(400).json({ error: "Message content cannot be empty" });
+    }
+
+    // If activeChatId is not a real YouTube API liveChatId (e.g. public-xxx) but token is available, resolve it
+    if (token && (!activeChatId || activeChatId.startsWith('public-')) && targetVideoId) {
+      try {
+        const vidUrl = `https://youtube.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${targetVideoId}`;
+        const vidRes = await fetch(vidUrl, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (vidRes.ok) {
+          const vidData = await vidRes.json();
+          if (vidData.items?.[0]?.liveStreamingDetails?.activeLiveChatId) {
+            activeChatId = vidData.items[0].liveStreamingDetails.activeLiveChatId;
+            streamMetadata.activeLiveChatId = activeChatId;
+          }
+        }
+      } catch (e) {
+        console.warn("[Resolve liveChatId error]", e);
+      }
     }
 
     // If chat is public scraper, no real liveChatId, or no OAuth token
@@ -244,7 +290,7 @@ async function startServer() {
         message: localMsg,
         notice: token
           ? "Message recorded in stream chat feed."
-          : "Message broadcast locally. (Sign in with Google in Authenticator to write directly to YouTube Chat API)"
+          : "Message broadcast in stream feed. (Log in with Google in Authenticator to write directly to YouTube Chat API)"
       });
     }
 
@@ -281,7 +327,7 @@ async function startServer() {
           isBot: true
         };
         chatMessagesQueue = [...chatMessagesQueue, sentMsg].slice(-200);
-        return res.json({ success: true, item: data });
+        return res.json({ success: true, item: data, liveChatId: activeChatId });
       } else {
         let errMessage = "YouTube LiveChat API returned an error";
         if (contentType.includes("json")) {

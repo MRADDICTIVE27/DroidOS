@@ -464,20 +464,29 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
               <Globe className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-sm font-bold text-white">YouTube Live Chat Sync Engine</h3>
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide border ${
                   streamMetadata.activeLiveChatId
                     ? 'bg-emerald-950 text-emerald-300 border-emerald-700/60'
                     : 'bg-rose-950 text-rose-300 border-rose-700/60'
                 }`}>
-                  {streamMetadata.activeLiveChatId ? '🟢 Live Connected' : '🔴 Offline / Not Connected'}
+                  {streamMetadata.activeLiveChatId ? '🟢 Ingest Active' : '🔴 Not Connected'}
                 </span>
+                {streamMetadata.activeLiveChatId && (
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+                    getAccessToken()
+                      ? 'bg-blue-950 text-blue-300 border-blue-700/60'
+                      : 'bg-amber-950/80 text-amber-300 border-amber-700/60'
+                  }`}>
+                    {getAccessToken() ? '✓ YouTube API Outbound Active' : 'ℹ️ Stream Overlay Mode (Sign in for YouTube chat output)'}
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-400">
                 {streamMetadata.activeLiveChatId 
-                  ? `Active Live Chat ID: ${streamMetadata.activeLiveChatId} • Polling real YouTube viewers & comments in real-time.`
-                  : 'Connect to your live broadcast to read and respond to real live viewers.'}
+                  ? `Live Stream Video: ${streamMetadata.videoId || streamMetadata.activeLiveChatId} • Reading chat messages in real time & responding to viewer commands.`
+                  : 'Connect to your live broadcast to sync chat, trigger bot replies, and award viewer points.'}
               </p>
             </div>
           </div>
