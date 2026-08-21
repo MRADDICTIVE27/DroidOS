@@ -34,6 +34,12 @@ export const initFirebase = async (): Promise<{ auth: Auth; db: Firestore } | nu
        return null;
     }
 
+    try {
+      localStorage.setItem('droidos_firebase_config', JSON.stringify(config));
+    } catch (e) {
+      console.warn('Could not persist Firebase config locally:', e);
+    }
+
     if (getApps().length === 0) {
       app = initializeApp(config);
     } else {

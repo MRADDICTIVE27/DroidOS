@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import defaultFirebaseConfig from '../firebase-applet-config.json';
 import { Header, ALL_WORKSPACE_TABS } from './components/Header';
 import { DashboardTab } from './components/DashboardTab';
 import { BotIdentityTab } from './components/BotIdentityTab';
@@ -107,10 +108,37 @@ export const App: React.FC = () => {
   const [isFirebaseConfigured, setIsFirebaseConfigured] = useState<boolean>(false);
 
   useEffect(() => {
-    const storedConfig = localStorage.getItem('droidos_firebase_config');
-    if (storedConfig) {
-      setIsFirebaseConfigured(true);
-    }
+    const ensureLocalPreconfiguredState = () => {
+      const bundledConfig = defaultFirebaseConfig as { apiKey?: string; projectId?: string } | null;
+      const resolvedConfig = bundledConfig && bundledConfig.apiKey && bundledConfig.projectId ? bundledConfig : null;
+
+      if (resolvedConfig) {
+        try {
+          localStorage.setItem('droidos_firebase_config', JSON.stringify(resolvedConfig));
+        } catch {
+          // ignore storage failures
+        }
+      }
+
+      const storedConfig = localStorage.getItem('droidos_firebase_config');
+      if (storedConfig) {
+        try {
+          const config = JSON.parse(storedConfig);
+          if (config && config.apiKey && config.projectId) {
+            setIsFirebaseConfigured(true);
+            return;
+          }
+        } catch {
+          setIsFirebaseConfigured(false);
+        }
+      }
+
+      if (resolvedConfig) {
+        setIsFirebaseConfigured(true);
+      }
+    };
+
+    ensureLocalPreconfiguredState();
   }, []);
 
   const [tabOrder, setTabOrder] = useState<string[]>(() => savedState?.tabOrder || [
@@ -202,7 +230,16 @@ export const App: React.FC = () => {
   const [showSupport, setShowSupport] = useState<boolean>(false);
   const [agreementAccepted, setAgreementAccepted] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('droidos_eula_accepted') === 'true';
+      const storedValue = localStorage.getItem('droidos_eula_accepted');
+      if (storedValue === 'true') return true;
+
+      const bundledConfig = defaultFirebaseConfig as { apiKey?: string; projectId?: string } | null;
+      if (bundledConfig?.apiKey && bundledConfig?.projectId) {
+        localStorage.setItem('droidos_eula_accepted', 'true');
+        return true;
+      }
+
+      return false;
     } catch {
       return false;
     }

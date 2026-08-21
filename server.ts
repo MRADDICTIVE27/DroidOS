@@ -73,6 +73,14 @@ const getUserRuntimeState = (uid?: string) => {
   return userRuntimeState.get(key)!;
 };
 
+// Backward-compatible runtime globals used by older route handlers.
+let streamMetadata: any = { ...defaultStreamMetadata };
+let cachedOAuthToken: string | null = null;
+let nextChatPageToken: string | null = null;
+let chatPollTimeout: NodeJS.Timeout | null = null;
+let innertubeApiKey = "AIzaSyAO_FJ2SlqU8Q4usACZaau0dsnYwcWsj2g";
+let innertubeContinuation: string | null = null;
+
 let overlayAlertsQueue: any[] = [];
 
 async function startServer() {
@@ -275,10 +283,10 @@ async function startServer() {
 
     try {
       if (videoId && isPlaceholderLiveChatId(chatId)) {
-        const resolvedId = await resolveActualLiveChatIdForVideo(videoId, token || undefined);
+        const resolvedId = await resolveActualLiveChatIdForVideo(uid || 'guest', videoId, token || undefined);
         if (resolvedId) {
           chatId = resolvedId;
-          streamMetadata.activeLiveChatId = resolvedId;
+          state.streamMetadata.activeLiveChatId = resolvedId;
         }
       }
 
@@ -286,7 +294,7 @@ async function startServer() {
       if ((apiKey || token) && chatId && !isPlaceholderLiveChatId(chatId)) {
         let url = `https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=${encodeURIComponent(chatId)}&part=snippet,authorDetails&maxResults=100`;
         if (apiKey) url += `&key=${apiKey}`;
-        if (nextChatPageToken) url += `&pageToken=${encodeURIComponent(nextChatPageToken)}`;
+        if (state.nextChatPageToken) url += `&pageToken=${encodeURIComponent(state.nextChatPageToken)}`;
 
         const headers: Record<string, string> = {};
         if (token && !apiKey) headers["Authorization"] = `Bearer ${token}`;
@@ -313,7 +321,7 @@ async function startServer() {
               }
             }
 
-            state.nextChatPageToken = data.nextPageToken;
+            state.nextChatPageToken = data.nextPageToken || null;
             const waitTime = data.pollingIntervalMillis || 3000;
             state.chatPollTimeout = setTimeout(() => pollYouTubeChat(uid), Math.max(2500, waitTime));
             return;
@@ -324,7 +332,7 @@ async function startServer() {
       }
 
       if (videoId) {
-        await fetchLiveChatFromInnertube(uid, videoId);
+        await fetchLiveChatFromInnertube(uid || 'guest', videoId);
         state.chatPollTimeout = setTimeout(() => pollYouTubeChat(uid), 2500);
         return;
       }
@@ -544,9 +552,11 @@ async function startServer() {
 
   // --- YouTube Diagnostics API ---
   app.post("/api/youtube/diagnostic", async (req, res) => {
+    const uid = (req.body.uid as string) || 'guest';
+    const state = getUserRuntimeState(uid);
     const { accessToken, videoId } = req.body;
-    const token = accessToken || req.headers.authorization?.replace("Bearer ", "") || cachedOAuthToken;
-    const targetVideoId = videoId || streamMetadata.videoId;
+    const token = accessToken || req.headers.authorization?.replace("Bearer ", "") || state.cachedOAuthToken;
+    const targetVideoId = videoId || state.streamMetadata.videoId;
 
     const report: {
       auth: { ok: boolean; message: string; userChannel?: any };
@@ -721,26 +731,27 @@ async function startServer() {
 
   // --- YouTube Stream Connect & Resolve Endpoints ---
   app.post("/api/youtube/connect", (req, res) => {
+    const uid = (req.body.uid as string) || 'guest';
+    const state = getUserRuntimeState(uid);
     const { activeLiveChatId, videoId, streamTitle, thumbnailUrl, viewerCount, isLive, accessToken } = req.body;
-    
-    if (activeLiveChatId !== undefined) streamMetadata.activeLiveChatId = activeLiveChatId;
-    if (videoId !== undefined) streamMetadata.videoId = videoId;
-    if (streamTitle !== undefined) streamMetadata.streamTitle = streamTitle;
-    if (thumbnailUrl !== undefined) streamMetadata.thumbnailUrl = thumbnailUrl;
-    if (viewerCount !== undefined) streamMetadata.viewerCount = viewerCount;
-    if (isLive !== undefined) streamMetadata.isLive = isLive;
-    if (accessToken) cachedOAuthToken = accessToken;
 
-    // Reset pagination token and trigger poll immediately
-    nextChatPageToken = null;
-    if (chatPollTimeout) clearTimeout(chatPollTimeout);
-    chatPollTimeout = null;
+    if (activeLiveChatId !== undefined) state.streamMetadata.activeLiveChatId = activeLiveChatId;
+    if (videoId !== undefined) state.streamMetadata.videoId = videoId;
+    if (streamTitle !== undefined) state.streamMetadata.streamTitle = streamTitle;
+    if (thumbnailUrl !== undefined) state.streamMetadata.thumbnailUrl = thumbnailUrl;
+    if (viewerCount !== undefined) state.streamMetadata.viewerCount = viewerCount;
+    if (isLive !== undefined) state.streamMetadata.isLive = isLive;
+    if (accessToken) state.cachedOAuthToken = accessToken;
 
-    if (streamMetadata.isLive && streamMetadata.activeLiveChatId) {
-      pollYouTubeChat();
+    state.nextChatPageToken = null;
+    if (state.chatPollTimeout) clearTimeout(state.chatPollTimeout);
+    state.chatPollTimeout = null;
+
+    if (state.streamMetadata.isLive && state.streamMetadata.activeLiveChatId) {
+      pollYouTubeChat(uid);
     }
 
-    res.json({ success: true, streamMetadata });
+    res.json({ success: true, streamMetadata: state.streamMetadata });
   });
 
   app.post("/api/youtube/resolve-stream", async (req, res) => {
@@ -954,12 +965,13 @@ async function startServer() {
   });
 
   // YouTube Stream Status & Broadcaster Listener Info
-  app.get("/api/youtube/status", (_req, res) => {
-    // Check if we should start polling chat
-    if (streamMetadata.isLive && streamMetadata.activeLiveChatId && !chatPollTimeout) {
-      pollYouTubeChat();
+  app.get("/api/youtube/status", (req, res) => {
+    const uid = (req.query.uid as string) || 'guest';
+    const state = getUserRuntimeState(uid);
+    if (state.streamMetadata.isLive && state.streamMetadata.activeLiveChatId && !state.chatPollTimeout) {
+      pollYouTubeChat(uid);
     }
-    res.json(streamMetadata);
+    res.json(state.streamMetadata);
   });
 
   // YouTube Data API v3 Auto-Detection & Verification
@@ -1057,34 +1069,38 @@ async function startServer() {
 
   // Update Stream Metadata (Title, Thumbnail, Live Status)
   app.post("/api/youtube/update-stream", (req, res) => {
+    const uid = (req.body.uid as string) || 'guest';
+    const state = getUserRuntimeState(uid);
     const { streamTitle, thumbnailUrl, isLive, streamerName, channelName, viewerCount } = req.body;
-    if (streamTitle !== undefined) streamMetadata.streamTitle = streamTitle;
-    if (thumbnailUrl !== undefined) streamMetadata.thumbnailUrl = thumbnailUrl;
-    if (isLive !== undefined) streamMetadata.isLive = isLive;
-    if (streamerName !== undefined) streamMetadata.streamerName = streamerName;
-    if (channelName !== undefined) streamMetadata.channelName = channelName;
-    if (viewerCount !== undefined) streamMetadata.viewerCount = viewerCount;
+    if (streamTitle !== undefined) state.streamMetadata.streamTitle = streamTitle;
+    if (thumbnailUrl !== undefined) state.streamMetadata.thumbnailUrl = thumbnailUrl;
+    if (isLive !== undefined) state.streamMetadata.isLive = isLive;
+    if (streamerName !== undefined) state.streamMetadata.streamerName = streamerName;
+    if (channelName !== undefined) state.streamMetadata.channelName = channelName;
+    if (viewerCount !== undefined) state.streamMetadata.viewerCount = viewerCount;
 
-    res.json({ success: true, stream: streamMetadata });
+    res.json({ success: true, stream: state.streamMetadata });
   });
 
   // Update Dual Auth (Streamer Auth vs Bot Account Auth)
   app.post("/api/youtube/auth", (req, res) => {
+    const uid = (req.body.uid as string) || 'guest';
+    const state = getUserRuntimeState(uid);
     const { type, authenticated, accountName } = req.body;
     if (type === "streamer") {
-      streamMetadata.streamerAuth = {
+      state.streamMetadata.streamerAuth = {
         authenticated: !!authenticated,
         accountName: accountName || "Broadcaster Account",
         channelId: "UC_STREAMER_" + Date.now().toString(36)
       };
     } else if (type === "bot") {
-      streamMetadata.botAuth = {
+      state.streamMetadata.botAuth = {
         authenticated: !!authenticated,
         accountName: accountName || "DroidBot (Default In-App)",
         channelId: "UC_BOT_" + Date.now().toString(36)
       };
     }
-    res.json({ success: true, streamerAuth: streamMetadata.streamerAuth, botAuth: streamMetadata.botAuth });
+    res.json({ success: true, streamerAuth: state.streamMetadata.streamerAuth, botAuth: state.streamMetadata.botAuth });
   });
 
   // AI Response Endpoint (!ai command or smart questions with personality & memory integration)
