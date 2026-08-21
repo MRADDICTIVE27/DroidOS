@@ -189,7 +189,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             {botIdentity.aiBrainMode === 'local' ? (
               <span className="text-blue-400 font-medium italic">Zero Credit Personality Engine Active</span>
             ) : aiEngineStatus.status === 'online' ? (
-              <span className="text-emerald-400 font-medium">Gemini 3.7 Intelligence Active</span>
+              <span className="text-emerald-400 font-medium">Gemini AI Active</span>
             ) : (
               <span className="text-amber-400">Fallback Engine: {aiEngineStatus.error || 'Local Only'}</span>
             )}

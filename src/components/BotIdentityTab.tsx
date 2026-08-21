@@ -239,7 +239,7 @@ export const BotIdentityTab: React.FC<BotIdentityTabProps> = ({
                 >
                   <Sparkles className="w-5 h-5" />
                   <span className="font-bold">Cloud AI</span>
-                  <span className="text-[9px] opacity-70">Gemini 3.7 • Needs Credits</span>
+                  <span className="text-[9px] opacity-70">Gemini Flash Lite • Free</span>
                 </button>
               </div>
 
@@ -250,7 +250,7 @@ export const BotIdentityTab: React.FC<BotIdentityTabProps> = ({
               }`}>
                 {formState.aiBrainMode === 'local' 
                   ? "Local mode uses a high-speed template engine. It requires zero API credits and works entirely within the app. Great for reliability!"
-                  : "Cloud mode uses advanced Gemini 3.7 Intelligence. It provides natural, flowing conversation but requires Google AI Studio prepayment credits."}
+                  : "Cloud mode uses advanced Gemini Intelligence. It provides natural, flowing conversation and does not require credits with Flash Lite."}
               </div>
             </div>
 

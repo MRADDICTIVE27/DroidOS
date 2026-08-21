@@ -382,7 +382,7 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
   const filteredMessages = messages.filter((m) => {
     if (selectedRoleFilter === 'all') return true;
     if (selectedRoleFilter === 'bot') return m.isBot;
-    return m.senderRole.toLowerCase() === selectedRoleFilter.toLowerCase();
+    return m.senderRole?.toLowerCase() === selectedRoleFilter?.toLowerCase();
   });
 
   return (
@@ -444,7 +444,7 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
                   <Bot className="w-3 h-3" />
                   {botIdentity.botName}
                   <span className="text-[10px] text-purple-400">
-                    ({streamMetadata.botAuth.authenticated ? 'Dedicated Auth' : 'Default In-App'})
+                    ({streamMetadata.botAuth?.authenticated ? 'Dedicated Auth' : 'Default In-App'})
                   </span>
                 </span>
               </div>
@@ -963,7 +963,7 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
             ) : (
               filteredMessages.map((msg, msgIndex) => {
                 const isBotMsg = msg.isBot;
-                const roleConfig = roles.find((r) => r.id === msg.senderRole || r.name.toLowerCase() === msg.senderRole.toLowerCase());
+                const roleConfig = roles.find((r) => r.id === msg.senderRole || r.name?.toLowerCase() === msg.senderRole?.toLowerCase());
 
                 return (
                   <div
@@ -990,7 +990,7 @@ export const LiveViewerTab: React.FC<LiveViewerTabProps> = ({
                               : roleConfig?.badgeBg || 'bg-slate-800 text-slate-300 border-slate-700'
                           }`}
                         >
-                          {isBotMsg ? '🤖 DROID BOT' : roleConfig?.badgeText || msg.senderRole.toUpperCase()}
+                          {isBotMsg ? '🤖 DROID BOT' : roleConfig?.badgeText || msg.senderRole?.toUpperCase() || 'VIEWER'}
                         </span>
                       </div>
 

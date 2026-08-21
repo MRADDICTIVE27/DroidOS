@@ -1156,7 +1156,7 @@ async function startServer() {
         const fullSystemInstruction = `${customPrompt}\n${personaGuidance}${factsContext}\nAlways mention @${user} and keep answers concise and punchy for live chat.`;
 
         const response = await client.models.generateContent({
-          model: "gemini-3.7-flash",
+          model: "gemini-3.1-flash-lite",
           contents: `Viewer @${user} asked in live chat: "${cleanPrompt}"`,
           config: {
             systemInstruction: fullSystemInstruction,
@@ -1166,7 +1166,7 @@ async function startServer() {
         const reply = response.text?.trim() || `Hello @${user}! All systems operational on ${channel}.`;
         return res.json({
           reply: reply.startsWith(`@${user}`) ? reply : `@${user} ${reply}`,
-          source: "gemini-3.7-flash",
+          source: "gemini-3.1-flash-lite",
           appliedResponseType: responseType || "default",
           status: "online"
         });
@@ -1258,7 +1258,7 @@ async function startServer() {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
     // Express v5 wildcard route
-    app.get("*", (_req, res) => {
+    app.get("*all", (_req, res) => {
       console.log("Wildcard route hit for:", _req.url);
       res.sendFile(path.join(distPath, "index.html"));
     });
