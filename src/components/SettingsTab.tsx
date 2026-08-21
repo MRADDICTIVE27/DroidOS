@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { PrivacyModal } from './PrivacyModal';
+import { TermsModal } from './TermsModal';
 import {
   Palette,
   LayoutGrid,
@@ -47,6 +49,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   const [importText, setImportText] = useState('');
   const [showImportArea, setShowImportArea] = useState(false);
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
+  const [showPrivacy, setShowPrivacy] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
 
   React.useEffect(() => {
     const getDevices = async () => {
@@ -343,6 +347,18 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             )}
           </div>
 
+      {/* Legal & Support Card */}
+          <div className="bg-slate-900/90 border border-slate-800/90 rounded-2xl p-5 shadow-xl space-y-4 text-xs">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2 pb-2 border-b border-slate-800">
+              <ShieldCheck className="w-4 h-4 text-slate-400" />
+              <span>Legal & Support</span>
+            </h3>
+            <div className="flex gap-3">
+              <button onClick={() => setShowPrivacy(true)} className="text-blue-400 hover:text-blue-300 underline">Privacy Policy</button>
+              <button onClick={() => setShowTerms(true)} className="text-blue-400 hover:text-blue-300 underline">Terms and Conditions</button>
+            </div>
+          </div>
+
           {/* Desktop App Installation Card */}
           <div className="bg-slate-900/90 border border-slate-800/90 rounded-2xl p-5 shadow-xl space-y-4 text-xs">
             <h3 className="text-sm font-bold text-white flex items-center gap-2 pb-2 border-b border-slate-800">
@@ -384,6 +400,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             </div>
           </div>
         </div>
+
+        <PrivacyModal isOpen={showPrivacy} onClose={() => setShowPrivacy(false)} />
+        <TermsModal isOpen={showTerms} onClose={() => setShowTerms(false)} />
 
         {/* Right: Tab Order Re-ordering (5 cols) */}
         <div className="lg:col-span-5 bg-slate-900/90 border border-slate-800/90 rounded-2xl p-5 shadow-xl space-y-4 flex flex-col text-xs">
