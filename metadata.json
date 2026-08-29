@@ -1,0 +1,6 @@
+{
+  "name": "DroidOS",
+  "description": "Windows Desktop streaming assistant and automation workstation for YouTube creators with local-first bot intelligence, OBS integration, rewards, economy, and chat games.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

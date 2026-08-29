@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DroidOS - OBS Live Overlay Source</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800;900&family=JetBrains+Mono:wght@700;800&family=Orbitron:wght@700;900&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      background: transparent;
+      overflow: hidden;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      color: #fff;
+    }
+
+    #overlay-root {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 32px;
+    }
+
+    /* Particle Canvas */
+    #fx-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 15;
+    }
+
+    /* Fullscreen Boss Failure Canvas Effect Overlay */
+    #screen-fx-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 50;
+      opacity: 0;
+      transition: opacity 0.4s ease;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #screen-fx-layer.active {
+      opacity: 1;
+    }
+
+    /* Fireball Effect */
+    .fx-fireball {
+      background: radial-gradient(circle at center, rgba(239, 68, 68, 0.85) 0%, rgba(249, 115, 22, 0.8) 40%, rgba(185, 28, 28, 0.95) 75%, #000 100%);
+      animation: firePulse 0.2s infinite alternate, screenShake 0.35s infinite;
+    }
+
+    /* Cyber Glitch Effect */
+    .fx-cyber-glitch {
+      background: repeating-linear-gradient(0deg, rgba(6, 182, 212, 0.15), rgba(6, 182, 212, 0.15) 2px, transparent 2px, transparent 4px),
+                  radial-gradient(circle at center, rgba(168, 85, 247, 0.7) 0%, rgba(15, 23, 42, 0.95) 80%);
+      animation: glitchScan 0.12s infinite, glitchShift 0.25s infinite alternate;
+      backdrop-filter: invert(0.2) hue-rotate(90deg);
+    }
+
+    /* Freeze Ice Screen Effect */
+    .fx-freeze {
+      background: radial-gradient(circle at center, rgba(147, 197, 253, 0.6) 0%, rgba(59, 130, 246, 0.75) 50%, rgba(30, 58, 138, 0.92) 100%);
+      backdrop-filter: blur(8px) contrast(1.2);
+      border: 12px solid rgba(224, 242, 254, 0.8);
+      animation: frostVibrate 0.4s infinite alternate;
+    }
+
+    /* Void Singularity Effect */
+    .fx-void {
+      background: radial-gradient(circle at center, #000000 15%, rgba(88, 28, 135, 0.85) 50%, rgba(15, 23, 42, 0.98) 90%);
+      animation: voidSpiral 4s linear infinite;
+    }
+
+    @keyframes firePulse {
+      0% { filter: brightness(1) saturate(1.2); }
+      100% { filter: brightness(1.4) saturate(1.8) drop-shadow(0 0 60px #ef4444); }
+    }
+
+    @keyframes screenShake {
+      0% { transform: translate(0, 0) rotate(0deg); }
+      25% { transform: translate(-6px, 4px) rotate(-0.5deg); }
+      50% { transform: translate(6px, -4px) rotate(0.5deg); }
+      75% { transform: translate(-4px, -6px) rotate(-0.3deg); }
+      100% { transform: translate(4px, 6px) rotate(0.3deg); }
+    }
+
+    @keyframes glitchScan {
+      0% { background-position: 0 0; }
+      100% { background-position: 0 100px; }
+    }
+
+    @keyframes glitchShift {
+      0% { transform: scale(1) skew(0deg); }
+      50% { transform: scale(1.02) skew(1.2deg); }
+      100% { transform: scale(0.99) skew(-1.2deg); }
+    }
+
+    @keyframes frostVibrate {
+      0% { transform: scale(1); filter: brightness(1); }
+      100% { transform: scale(1.008); filter: brightness(1.15); }
+    }
+
+    @keyframes voidSpiral {
+      0% { transform: rotate(0deg) scale(1); }
+      50% { transform: rotate(180deg) scale(1.05); }
+      100% { transform: rotate(360deg) scale(1); }
+    }
+
+    /* Persistent Top Boss Bar HUD */
+    #boss-hud {
+      position: absolute;
+      top: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(840px, 92vw);
+      z-index: 40;
+      display: none;
+      animation: slideDown 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    #boss-hud.active {
+      display: block;
+    }
+
+    .boss-hud-card {
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.94) 100%);
+      border: 2px solid rgba(239, 68, 68, 0.6);
+      border-radius: 20px;
+      padding: 16px 22px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 30px rgba(239, 68, 68, 0.35);
+      backdrop-filter: blur(16px);
+    }
+
+    .boss-hud-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .boss-identity {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .boss-icon-badge {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #ef4444, #b91c1c);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      box-shadow: 0 0 16px rgba(239, 68, 68, 0.5);
+    }
+
+    .boss-name {
+      font-size: 18px;
+      font-weight: 900;
+      color: #fff;
+      letter-spacing: -0.01em;
+    }
+
+    .boss-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: #f87171;
+    }
+
+    .boss-timer-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 100px;
+      background: rgba(239, 68, 68, 0.2);
+      border: 1px solid rgba(239, 68, 68, 0.5);
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 800;
+      font-size: 14px;
+      color: #fca5a5;
+    }
+
+    .boss-timer-badge.urgent {
+      background: rgba(239, 68, 68, 0.6);
+      color: #fff;
+      animation: timerBlink 0.6s infinite alternate;
+    }
+
+    @keyframes timerBlink {
+      0% { transform: scale(1); box-shadow: 0 0 0 rgba(239, 68, 68, 0); }
+      100% { transform: scale(1.08); box-shadow: 0 0 20px rgba(239, 68, 68, 0.8); }
+    }
+
+    .boss-hp-track {
+      width: 100%;
+      height: 18px;
+      border-radius: 100px;
+      background: rgba(255, 255, 255, 0.1);
+      overflow: hidden;
+      position: relative;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.6);
+    }
+
+    .boss-hp-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #ef4444, #f97316, #eab308);
+      border-radius: 100px;
+      transition: width 0.3s ease-out;
+      box-shadow: 0 0 14px rgba(239, 68, 68, 0.8);
+    }
+
+    .boss-hp-text {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #94a3b8;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Toast Container (Bottom Left for Achievements, Games & Redeems) */
+    .toast-container {
+      position: absolute;
+      bottom: 32px;
+      left: 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      z-index: 30;
+    }
+
+    /* Console Achievement Banner Styles */
+    .banner-card {
+      min-width: 380px;
+      max-width: 520px;
+      border-radius: 20px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(16px);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      animation: slideInLeft 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      transform-origin: bottom left;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .banner-card.fade-out {
+      animation: slideOutLeft 0.4s cubic-bezier(0.7, 0, 0.84, 0) forwards;
+    }
+
+    /* 1. XBOX ACHIEVEMENT BANNER */
+    .banner-card.xbox {
+      background: linear-gradient(135deg, rgba(16, 20, 18, 0.96) 0%, rgba(20, 36, 26, 0.94) 100%);
+      border: 2px solid #107c10;
+      box-shadow: 0 20px 45px rgba(0, 0, 0, 0.8), 0 0 30px rgba(16, 124, 16, 0.45);
+      border-radius: 100px;
+      padding: 12px 24px 12px 14px;
+    }
+
+    .xbox-orb {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #22c55e, #15803d 60%, #14532d 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      box-shadow: 0 0 20px rgba(34, 197, 94, 0.7), inset 0 2px 4px rgba(255, 255, 255, 0.5);
+      flex-shrink: 0;
+    }
+
+    .xbox-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .xbox-tag {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #4ade80;
+    }
+
+    .xbox-gamerscore {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      font-size: 11px;
+      font-weight: 900;
+      color: #fff;
+      background: rgba(34, 197, 94, 0.25);
+      padding: 1px 7px;
+      border-radius: 100px;
+      border: 1px solid rgba(74, 222, 128, 0.4);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .xbox-title {
+      font-size: 14px;
+      font-weight: 800;
+      color: #fff;
+      margin-top: 2px;
+      line-height: 1.25;
+    }
+
+    .xbox-desc {
+      font-size: 11px;
+      color: #86efac;
+      font-weight: 600;
+      margin-top: 2px;
+    }
+
+    /* 2. PLAYSTATION TROPHY BANNER */
+    .banner-card.playstation {
+      background: linear-gradient(135deg, rgba(8, 15, 35, 0.96) 0%, rgba(13, 27, 62, 0.94) 100%);
+      border: 2px solid #3b82f6;
+      box-shadow: 0 20px 45px rgba(0, 0, 0, 0.8), 0 0 30px rgba(59, 130, 246, 0.45);
+      border-radius: 100px;
+      padding: 12px 24px 12px 14px;
+    }
+
+    .ps-orb {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #60a5fa, #2563eb 60%, #1e3a8a 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      box-shadow: 0 0 20px rgba(59, 130, 246, 0.7), inset 0 2px 4px rgba(255, 255, 255, 0.5);
+      flex-shrink: 0;
+    }
+
+    .ps-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .ps-tag {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #93c5fd;
+    }
+
+    .ps-tier-badge {
+      font-size: 10px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 1px 8px;
+      border-radius: 100px;
+      background: rgba(59, 130, 246, 0.3);
+      border: 1px solid rgba(147, 197, 253, 0.4);
+      color: #dbeafe;
+    }
+
+    .ps-title {
+      font-size: 14px;
+      font-weight: 800;
+      color: #fff;
+      margin-top: 2px;
+      line-height: 1.25;
+    }
+
+    .ps-desc {
+      font-size: 11px;
+      color: #bfdbfe;
+      font-weight: 600;
+      margin-top: 2px;
+    }
+
+    /* 3. STEAM ACHIEVEMENT BANNER */
+    .banner-card.steam {
+      background: linear-gradient(135deg, rgba(23, 29, 37, 0.97) 0%, rgba(13, 17, 23, 0.96) 100%);
+      border: 2px solid #66c0f4;
+      box-shadow: 0 20px 45px rgba(0, 0, 0, 0.85), 0 0 30px rgba(102, 192, 244, 0.4);
+      border-radius: 14px;
+      padding: 14px 20px;
+    }
+
+    .steam-icon-box {
+      width: 50px;
+      height: 50px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #1b2838, #171a21);
+      border: 1.5px solid #66c0f4;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      box-shadow: 0 0 16px rgba(102, 192, 244, 0.5);
+      flex-shrink: 0;
+    }
+
+    .steam-header {
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #66c0f4;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .steam-title {
+      font-size: 14px;
+      font-weight: 800;
+      color: #fff;
+      margin-top: 2px;
+      line-height: 1.25;
+    }
+
+    .steam-desc {
+      font-size: 11px;
+      color: #8f98a0;
+      font-weight: 600;
+      margin-top: 2px;
+    }
+
+    /* 4. CHAT GAME LIVE PREVIEW CARD (Slots, Heist, Duel, Coin Pusher) */
+    .game-preview-card {
+      min-width: 400px;
+      max-width: 520px;
+      border-radius: 20px;
+      padding: 16px 20px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 25px 50px rgba(0, 0, 0, 0.8);
+      animation: popIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .game-preview-card.slots {
+      background: linear-gradient(135deg, rgba(30, 27, 75, 0.96), rgba(49, 10, 100, 0.94));
+      border: 2px solid #c084fc;
+      box-shadow: 0 0 35px rgba(192, 132, 252, 0.45);
+    }
+
+    .game-preview-card.heist {
+      background: linear-gradient(135deg, rgba(67, 20, 7, 0.96), rgba(26, 10, 5, 0.94));
+      border: 2px solid #fb923c;
+      box-shadow: 0 0 35px rgba(251, 146, 60, 0.45);
+    }
+
+    .game-preview-card.duel {
+      background: linear-gradient(135deg, rgba(3, 40, 50, 0.96), rgba(8, 20, 40, 0.94));
+      border: 2px solid #22d3ee;
+      box-shadow: 0 0 35px rgba(34, 211, 238, 0.45);
+    }
+
+    .game-preview-card.coinpush {
+      background: linear-gradient(135deg, rgba(69, 45, 0, 0.96), rgba(30, 20, 0, 0.94));
+      border: 2px solid #facc15;
+      box-shadow: 0 0 35px rgba(250, 204, 21, 0.45);
+    }
+
+    .game-preview-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      padding-bottom: 8px;
+    }
+
+    .game-badge {
+      font-size: 10px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      padding: 2px 8px;
+      border-radius: 100px;
+    }
+
+    .slots .game-badge { background: rgba(192, 132, 252, 0.25); color: #e9d5ff; border: 1px solid #c084fc; }
+    .heist .game-badge { background: rgba(251, 146, 60, 0.25); color: #ffedd5; border: 1px solid #fb923c; }
+    .duel .game-badge { background: rgba(34, 211, 238, 0.25); color: #cffafe; border: 1px solid #22d3ee; }
+    .coinpush .game-badge { background: rgba(250, 204, 21, 0.25); color: #fef08a; border: 1px solid #facc15; }
+
+    .game-stage-visual {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      font-size: 36px;
+      padding: 12px;
+      background: rgba(0, 0, 0, 0.4);
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: inset 0 4px 10px rgba(0,0,0,0.5);
+    }
+    
+    .slot-item {
+      display: inline-block;
+      animation: slotSpin 0.5s ease-out;
+    }
+    .slot-item:nth-child(2) { animation-delay: 0.1s; }
+    .slot-item:nth-child(3) { animation-delay: 0.2s; }
+
+    @keyframes slotSpin {
+      0% { transform: translateY(-40px) scale(0.8); opacity: 0; }
+      50% { transform: translateY(10px) scale(1.1); opacity: 1; }
+      100% { transform: translateY(0) scale(1); }
+    }
+    
+    .heist-item {
+      display: inline-block;
+      animation: heistSneak 1s ease-in-out infinite alternate;
+    }
+    
+    @keyframes heistSneak {
+      0% { transform: translateX(-5px) rotate(-10deg); filter: drop-shadow(0 0 5px rgba(255,0,0,0.5)); }
+      100% { transform: translateX(5px) rotate(10deg); filter: drop-shadow(0 0 10px rgba(255,0,0,0.8)); }
+    }
+    
+    .duel-item {
+      display: inline-block;
+      animation: duelShoot 0.4s ease-out;
+    }
+    
+    @keyframes duelShoot {
+      0% { transform: scale(0.5) rotate(-45deg); opacity: 0; }
+      50% { transform: scale(1.3) rotate(15deg); opacity: 1; filter: brightness(2); }
+      100% { transform: scale(1) rotate(0deg); }
+    }
+    }
+
+    .game-payout-pill {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 800;
+      color: #fff;
+    }
+
+    .payout-val {
+      font-family: 'JetBrains Mono', monospace;
+      color: #4ade80;
+      font-size: 15px;
+    }
+
+    @keyframes slideInLeft {
+      from { opacity: 0; transform: translateX(-60px) scale(0.9); }
+      to { opacity: 1; transform: translateX(0) scale(1); }
+    }
+
+    @keyframes slideOutLeft {
+      from { opacity: 1; transform: translateX(0) scale(1); }
+      to { opacity: 0; transform: translateX(-60px) scale(0.9); }
+    }
+
+    @keyframes slideDown {
+      from { opacity: 0; transform: translate(-50%, -40px); }
+      to { opacity: 1; transform: translate(-50%, 0); }
+    }
+
+    @keyframes popIn {
+      from { opacity: 0; transform: scale(0.85); }
+      to { opacity: 1; transform: scale(1); }
+    }
+  </style>
+</head>
+<body>
+  <!-- Canvas for Confetti, Fire, Coins, Particles -->
+  <canvas id="fx-canvas"></canvas>
+
+  <!-- Fullscreen Boss Failure Canvas Layer -->
+  <div id="screen-fx-layer">
+    <div id="screen-fx-content" style="text-align: center; max-width: 800px; padding: 32px;">
+      <div id="screen-fx-icon" style="font-size: 80px; margin-bottom: 16px;">🔥</div>
+      <h1 id="screen-fx-title" style="font-size: clamp(36px, 6vw, 64px); font-weight: 900; font-family: 'Orbitron', sans-serif; letter-spacing: 0.04em; text-shadow: 0 0 30px rgba(0,0,0,0.9);">
+        CHAT INCINERATED!
+      </h1>
+      <p id="screen-fx-subtitle" style="font-size: 20px; font-weight: 700; color: #fff; margin-top: 12px; text-shadow: 0 2px 10px rgba(0,0,0,0.8);">
+        Ignis the Fire Dragon engulfed the broadcast in flames!
+      </p>
+    </div>
+  </div>
+
+  <div id="overlay-root">
+    <!-- Top Persistent Boss Bar HUD -->
+    <div id="boss-hud">
+      <div class="boss-hud-card">
+        <div class="boss-hud-header">
+          <div class="boss-identity">
+            <div class="boss-icon-badge" id="boss-hud-icon">🐲</div>
+            <div>
+              <div class="boss-name" id="boss-hud-name">Ignis the Fire Dragon</div>
+              <div class="boss-title" id="boss-hud-title">Inferno Raid Boss</div>
+            </div>
+          </div>
+          <div class="boss-timer-badge" id="boss-hud-timer">
+            <span>⏱️</span>
+            <span id="boss-hud-seconds">60s</span>
+          </div>
+        </div>
+        <div class="boss-hp-track">
+          <div class="boss-hp-fill" id="boss-hud-hp-fill" style="width: 100%;"></div>
+        </div>
+        <div class="boss-hp-text">
+          <span id="boss-hud-hp-curr">10,000 / 10,000 HP</span>
+          <span id="boss-hud-hp-pct">100%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Left Alert Cards Container -->
+    <div class="toast-container" id="toast-container"></div>
+  </div>
+
+  <script>
+    const toastContainer = document.getElementById('toast-container');
+    const bossHud = document.getElementById('boss-hud');
+    const bossHudIcon = document.getElementById('boss-hud-icon');
+    const bossHudName = document.getElementById('boss-hud-name');
+    const bossHudTitle = document.getElementById('boss-hud-title');
+    const bossHudTimer = document.getElementById('boss-hud-timer');
+    const bossHudSeconds = document.getElementById('boss-hud-seconds');
+    const bossHudHpFill = document.getElementById('boss-hud-hp-fill');
+    const bossHudHpCurr = document.getElementById('boss-hud-hp-curr');
+    const bossHudHpPct = document.getElementById('boss-hud-hp-pct');
+
+    const screenFxLayer = document.getElementById('screen-fx-layer');
+    const screenFxIcon = document.getElementById('screen-fx-icon');
+    const screenFxTitle = document.getElementById('screen-fx-title');
+    const screenFxSubtitle = document.getElementById('screen-fx-subtitle');
+
+    const canvas = document.getElementById('fx-canvas');
+    const ctx = canvas.getContext('2d');
+
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Sound Synthesizer in OBS overlay
+    function playAudio(preset) {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const actx = new AudioCtx();
+        const now = actx.currentTime;
+
+        if (preset === 'xbox' || preset === 'xbox_chime') {
+          [ { f: 1318.51, s: 0, d: 0.12 }, { f: 1975.53, s: 0.09, d: 0.75 } ].forEach(t => {
+            const osc = actx.createOscillator();
+            const gain = actx.createGain();
+            osc.frequency.setValueAtTime(t.f, now + t.s);
+            gain.gain.setValueAtTime(0.28, now + t.s);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + t.s + t.d);
+            osc.connect(gain);
+            gain.connect(actx.destination);
+            osc.start(now + t.s);
+            osc.stop(now + t.s + t.d);
+          });
+        } else if (preset === 'playstation' || preset === 'ps_trophy') {
+          [1046.5, 1318.51, 1567.98, 2093.0].forEach((freq, idx) => {
+            const osc = actx.createOscillator();
+            const gain = actx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(freq, now + idx * 0.05);
+            gain.gain.setValueAtTime(0.24, now + idx * 0.05);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.05 + 0.6);
+            osc.connect(gain);
+            gain.connect(actx.destination);
+            osc.start(now + idx * 0.05);
+            osc.stop(now + idx * 0.05 + 0.6);
+          });
+        } else if (preset === 'steam' || preset === 'steam_ding') {
+          const osc = actx.createOscillator();
+          const gain = actx.createGain();
+          osc.frequency.setValueAtTime(880, now);
+          osc.frequency.exponentialRampToValueAtTime(1760, now + 0.08);
+          gain.gain.setValueAtTime(0.26, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+          osc.connect(gain);
+          gain.connect(actx.destination);
+          osc.start(now);
+          osc.stop(now + 0.5);
+        } else if (preset === 'fireball') {
+          const osc = actx.createOscillator();
+          const gain = actx.createGain();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(180, now);
+          osc.frequency.exponentialRampToValueAtTime(45, now + 1.2);
+          gain.gain.setValueAtTime(0.35, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 1.4);
+          osc.connect(gain);
+          gain.connect(actx.destination);
+          osc.start(now);
+          osc.stop(now + 1.4);
+        } else if (preset === 'cyber_glitch') {
+          for (let i = 0; i < 6; i++) {
+            const osc = actx.createOscillator();
+            const gain = actx.createGain();
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(200 + Math.random() * 600, now + i * 0.05);
+            gain.gain.setValueAtTime(0.2, now + i * 0.05);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.05 + 0.04);
+            osc.connect(gain);
+            gain.connect(actx.destination);
+            osc.start(now + i * 0.05);
+            osc.stop(now + i * 0.05 + 0.04);
+          }
+        } else {
+          // Default chime
+          [587.33, 880.0, 1174.66].forEach((freq, idx) => {
+            const osc = actx.createOscillator();
+            const gain = actx.createGain();
+            osc.frequency.setValueAtTime(freq, now + idx * 0.06);
+            gain.gain.setValueAtTime(0.2, now + idx * 0.06);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.06 + 0.5);
+            osc.connect(gain);
+            gain.connect(actx.destination);
+            osc.start(now + idx * 0.06);
+            osc.stop(now + idx * 0.06 + 0.5);
+          });
+        }
+      } catch (e) {}
+    }
+
+    // Particles system
+    let particles = [];
+    function emitParticles(type = 'confetti', count = 70) {
+      for (let i = 0; i < count; i++) {
+        particles.push({
+          x: Math.random() * canvas.width,
+          y: -20 - Math.random() * 60,
+          vx: (Math.random() - 0.5) * 5,
+          vy: Math.random() * 4 + 3,
+          rot: Math.random() * 360,
+          vrot: (Math.random() - 0.5) * 8,
+          size: Math.random() * 10 + 6,
+          color: ['#10b981', '#3b82f6', '#ec4899', '#f59e0b', '#8b5cf6', '#06b6d4'][Math.floor(Math.random() * 6)],
+          type: type,
+          life: 1
+        });
+      }
+    }
+
+    function renderParticles() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.rot += p.vrot;
+        p.life -= 0.004;
+
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate((p.rot * Math.PI) / 180);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+        ctx.restore();
+
+        if (p.y > canvas.height + 40 || p.life <= 0) {
+          particles.splice(i, 1);
+        }
+      }
+      requestAnimationFrame(renderParticles);
+    }
+    requestAnimationFrame(renderParticles);
+
+    // Show Alert Handler
+    function handleIncomingAlert(alert) {
+      // 1. Boss failure effect trigger
+      if (alert.type === 'boss_failure') {
+        showBossFailureEffect(alert);
+        return;
+      }
+
+      // 2. Boss persistent HUD update
+      if (alert.type === 'boss_attack' || alert.type === 'boss_defeat') {
+        updateBossHud(alert);
+      }
+
+      // 3. Achievement Console Banners
+      if (alert.type === 'achievement') {
+        showAchievementBanner(alert);
+        return;
+      }
+
+      // 4. Chat Game Previews (Slots, Heist, Duel, Coin Pusher)
+      if (alert.type === 'game' || alert.type === 'slots' || alert.type === 'heist' || alert.type === 'duel' || alert.type === 'coinpush') {
+        showGamePreviewCard(alert);
+        return;
+      }
+
+      // 5. General Alerts / Redeems
+      showGenericAlert(alert);
+    }
+
+    // 1. Achievement Banner Renderers (Xbox, PlayStation, Steam)
+    function showAchievementBanner(alert) {
+      const preset = alert.bannerPreset || 'xbox';
+      const username = alert.username || 'PixelKnight';
+      const title = alert.title || 'First Contact';
+      const desc = alert.description || alert.subtitle || alert.customMessage || '';
+      const points = alert.points || 500;
+      const gamerscore = alert.gamerscore || 50;
+      const trophyTier = (alert.trophyTier || 'gold').toUpperCase();
+
+      const card = document.createElement('div');
+      card.className = `banner-card ${preset}`;
+
+      if (preset === 'xbox') {
+        card.innerHTML = `
+          <div class="xbox-orb">💚</div>
+          <div style="flex: 1; min-width: 0;">
+            <div class="xbox-header">
+              <span class="xbox-tag">Achievement Unlocked</span>
+              <span class="xbox-gamerscore">(${gamerscore}G)</span>
+            </div>
+            <div class="xbox-title">${username} has unlocked the ${title} achievement</div>
+            <div class="xbox-desc">+${points} DroidCoins ${desc ? `• ${desc}` : ''}</div>
+          </div>
+        `;
+        playAudio('xbox');
+      } else if (preset === 'playstation') {
+        card.innerHTML = `
+          <div class="ps-orb">🏆</div>
+          <div style="flex: 1; min-width: 0;">
+            <div class="ps-header">
+              <span class="ps-tag">Trophy Unlocked</span>
+              <span class="ps-tier-badge">${trophyTier}</span>
+            </div>
+            <div class="ps-title">${username} has unlocked the ${title} trophy</div>
+            <div class="ps-desc">+${points} pts ${desc ? `• ${desc}` : ''}</div>
+          </div>
+        `;
+        playAudio('playstation');
+      } else {
+        // Steam Preset
+        card.innerHTML = `
+          <div class="steam-icon-box">⭐</div>
+          <div style="flex: 1; min-width: 0;">
+            <div class="steam-header">STEAM ACHIEVEMENT UNLOCKED</div>
+            <div class="steam-title">${username} has unlocked an achievement: ${title}</div>
+            <div class="steam-desc">+${points} pts ${desc ? `• ${desc}` : ''}</div>
+          </div>
+        `;
+        playAudio('steam');
+      }
+
+      toastContainer.appendChild(card);
+      emitParticles('confetti', 50);
+
+      const duration = alert.durationMs || 6000;
+      setTimeout(() => {
+        card.classList.add('fade-out');
+        setTimeout(() => card.remove(), 450);
+      }, duration);
+    }
+
+    // 2. Chat Game Live Preview Card (4-7s)
+    function showGamePreviewCard(alert) {
+      const card = document.createElement('div');
+      const gameType = alert.gameType || (alert.type === 'game' ? 'slots' : alert.type);
+      card.className = `game-preview-card ${gameType}`;
+
+      let visualHtml = '';
+      let headerTitle = '';
+
+      if (gameType === 'slots') {
+        headerTitle = '🎰 VEGAS SLOTS ACTION';
+        visualHtml = `
+          <div class="game-stage-visual">
+            <span class="slot-item">🎰</span><span class="slot-item">🍒</span><span class="slot-item">💎</span>
+          </div>
+        `;
+        playAudio('coin');
+      } else if (gameType === 'heist') {
+        headerTitle = '🏦 BANK HEIST RAID';
+        visualHtml = `
+          <div class="game-stage-visual">
+            <span class="heist-item">🥷</span><span class="heist-item">💰</span><span class="heist-item">🚁</span>
+          </div>
+        `;
+        playAudio('heist_alarm');
+      } else if (gameType === 'duel') {
+        headerTitle = '⚔️ 1v1 DUEL STANDOFF';
+        visualHtml = `
+          <div class="game-stage-visual">
+            <span class="duel-item">🤠</span><span class="duel-item">🔫</span><span class="duel-item">🤠</span>
+          </div>
+        `;
+        playAudio('shootout');
+      } else {
+        headerTitle = '🪙 COIN PUSHER JACKPOT';
+        visualHtml = `
+          <div class="game-stage-visual">
+            <span class="slot-item">🪙</span><span class="slot-item">🪙</span><span class="slot-item">✨</span>
+          </div>
+        `;
+        playAudio('coin');
+      }
+
+      card.innerHTML = `
+        <div class="game-preview-header">
+          <span class="game-badge">${headerTitle}</span>
+          <span style="font-size: 11px; font-mono; color: #cbd5e1;">@${alert.username || 'Chat'}</span>
+        </div>
+        ${visualHtml}
+        <div class="game-payout-pill">
+          <span>${alert.title || alert.outcome || 'Game Event Triggered'}</span>
+          <span class="payout-val">+${alert.payoutAmount || alert.points || 500} pts</span>
+        </div>
+      `;
+
+      toastContainer.appendChild(card);
+      emitParticles('confetti', 40);
+
+      const duration = alert.durationMs || 5500;
+      setTimeout(() => {
+        card.classList.add('fade-out');
+        setTimeout(() => card.remove(), 450);
+      }, duration);
+    }
+
+    // 3. Persistent Boss Bar Update
+    function updateBossHud(alert) {
+      if (alert.type === 'boss_defeat') {
+        bossHud.classList.remove('active');
+        playAudio('victory');
+        emitParticles('confetti', 100);
+        return;
+      }
+
+      bossHud.classList.add('active');
+      if (alert.bossName) {
+        bossHudName.textContent = alert.bossName;
+        // Generate custom avatar
+        const seed = encodeURIComponent(alert.bossName);
+        bossHudIcon.innerHTML = `<img src="https://api.dicebear.com/7.x/bottts/svg?seed=${seed}&colors=amber,blue,cyan,green,indigo,lime,orange,pink,purple,red,teal,yellow" style="width:100%;height:100%;border-radius:12px;object-fit:cover;" />`;
+      }
+      if (alert.subtitle) bossHudTitle.textContent = alert.subtitle;
+
+      if (alert.remainingSeconds !== undefined) {
+        bossHudSeconds.textContent = `${alert.remainingSeconds}s`;
+        if (alert.remainingSeconds <= 15) {
+          bossHudTimer.classList.add('urgent');
+        } else {
+          bossHudTimer.classList.remove('urgent');
+        }
+      }
+
+      if (alert.currentHp !== undefined && alert.maxHp !== undefined) {
+        const pct = Math.max(0, Math.min(100, Math.round((alert.currentHp / alert.maxHp) * 100)));
+        bossHudHpFill.style.width = `${pct}%`;
+        bossHudHpCurr.textContent = `${alert.currentHp.toLocaleString()} / ${alert.maxHp.toLocaleString()} HP`;
+        bossHudHpPct.textContent = `${pct}%`;
+      }
+    }
+
+    // 4. Fullscreen Boss Failure Effect (Fireball, Cyber Glitch, Freeze, Void)
+    function showBossFailureEffect(alert) {
+      const effect = alert.bossFailureEffect || 'fireball';
+      screenFxLayer.className = `active fx-${effect === 'cyber_glitch' ? 'cyber-glitch' : effect === 'freeze_screen' ? 'freeze' : effect === 'void_collapse' ? 'void' : 'fireball'}`;
+
+      if (effect === 'fireball') {
+        screenFxIcon.textContent = '🔥';
+        screenFxTitle.textContent = alert.title || 'CHAT INCINERATED!';
+        screenFxSubtitle.textContent = alert.subtitle || 'Ignis engulfed the stream in a raging fireball barrage!';
+        playAudio('fireball');
+      } else if (effect === 'cyber_glitch') {
+        screenFxIcon.textContent = '👾';
+        screenFxTitle.textContent = alert.title || 'SYSTEM OVERRIDE / GLITCH!';
+        screenFxSubtitle.textContent = alert.subtitle || 'Glitch-9 corrupted the stream mainframe!';
+        playAudio('cyber_glitch');
+      } else if (effect === 'freeze_screen') {
+        screenFxIcon.textContent = '❄️';
+        screenFxTitle.textContent = alert.title || 'ABSOLUTE ZERO FREEZE!';
+        screenFxSubtitle.textContent = alert.subtitle || 'Ymir froze the entire stream in solid ice crystals!';
+        playAudio('freeze_crack');
+      } else {
+        screenFxIcon.textContent = '🌌';
+        screenFxTitle.textContent = alert.title || 'COSMIC VOID COLLAPSE!';
+        screenFxSubtitle.textContent = alert.subtitle || 'The stream was sucked into a black hole singularity!';
+        playAudio('void_collapse');
+      }
+
+      // Keep failure effect visible on screen for 6-8 seconds
+      setTimeout(() => {
+        screenFxLayer.classList.remove('active');
+        screenFxLayer.className = '';
+      }, alert.durationMs || 7000);
+    }
+
+    // 5. Generic Alert
+    function showGenericAlert(alert) {
+      const card = document.createElement('div');
+      card.className = 'banner-card steam';
+      card.innerHTML = `
+        <div class="steam-icon-box">${alert.icon || '🎁'}</div>
+        <div style="flex: 1; min-width: 0;">
+          <div class="steam-header">${alert.subtitle || 'STREAM NOTIFICATION'}</div>
+          <div class="steam-title">${alert.title || 'DroidOS Alert'}</div>
+          <div class="steam-desc">${alert.customMessage || alert.description || ''}</div>
+        </div>
+      `;
+      toastContainer.appendChild(card);
+      playAudio('chime');
+      setTimeout(() => {
+        card.classList.add('fade-out');
+        setTimeout(() => card.remove(), 450);
+      }, alert.durationMs || 5000);
+    }
+
+    // BroadcastChannel Listener for local tab synchronization
+    try {
+      const channel = new BroadcastChannel('droidos_alerts');
+      channel.onmessage = (e) => {
+        if (e.data) handleIncomingAlert(e.data);
+      };
+    } catch (e) {}
+
+    // Polling API endpoint
+    let lastPollTime = Date.now();
+    async function pollAlerts() {
+      try {
+        const res = await fetch(`/api/overlay/alerts?since=${lastPollTime}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.alerts)) {
+            data.alerts.forEach(a => {
+              if (a.timestamp > lastPollTime) lastPollTime = a.timestamp;
+              handleIncomingAlert(a);
+            });
+          }
+        }
+      } catch (e) {}
+      setTimeout(pollAlerts, 1500);
+    }
+    pollAlerts();
+  </script>
+</body>
+</html>
+

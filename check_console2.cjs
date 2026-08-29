@@ -1,0 +1,1 @@
+const puppeteer = require('puppeteer'); (async () => { const browser = await puppeteer.launch(); const page = await browser.newPage(); page.on('response', res => { if (res.status() === 404) console.log('404:', res.url()); }); await page.goto('http://localhost:3000', { waitUntil: 'networkidle2' }); await browser.close(); process.exit(0); })();
